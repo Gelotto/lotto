@@ -7,8 +7,20 @@ pub enum ContractError {
   Std(#[from] StdError),
 
   #[error("NotAuthorized")]
-  NotAuthorized {},
+  NotAuthorized,
 
-  #[error("ValidationError")]
-  ValidationError {},
+  #[error("TicketExists")]
+  TicketExists,
+
+  #[error("InvalidNumberCount")]
+  InvalidNumberCount,
+
+  #[error("NumberOutOfBounds")]
+  NumberOutOfBounds,
+
+  #[error("InsufficientFunds")]
+  InsufficientFunds,
+
+  #[error("AccountNotFound")]
+  AccountNotFound,
 }
