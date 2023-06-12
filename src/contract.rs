@@ -30,7 +30,7 @@ pub fn execute(
   msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
   match msg {
-    ExecuteMsg::Bet { numbers } => execute::buy(deps, env, info, numbers),
+    ExecuteMsg::Buy { tickets } => execute::buy(deps, env, info, tickets),
     ExecuteMsg::Draw {} => todo!(),
   }
 }

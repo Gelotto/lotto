@@ -12,7 +12,7 @@ pub struct InstantiateMsg {
 
 #[cw_serde]
 pub enum ExecuteMsg {
-  Bet { numbers: Vec<u16> },
+  Buy { tickets: Vec<Vec<u16>> },
   Draw {},
 }
 

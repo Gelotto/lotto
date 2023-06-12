@@ -1,13 +1,15 @@
 use crate::{
   error::ContractError,
+  models::PlayerWin,
   state::{
-    ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_TOKEN, LOOKUP_TABLE, ROUND_COUNTER,
-    TAX_RATES, TICKETS, TICKET_COUNT,
+    ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_TOKEN, LOOKUP_TABLE,
+    MAX_RECENT_WINS_LEN, ROUND_COUNTER, TAX_RATES, TICKETS, TICKET_COUNT,
   },
   util::hash_numbers,
 };
 use cosmwasm_std::{
-  attr, Addr, DepsMut, Env, MessageInfo, Order, Response, Storage, SubMsg, Uint128, Uint64,
+  attr, Addr, BlockInfo, DepsMut, Env, MessageInfo, Order, Response, Storage, SubMsg, Uint128,
+  Uint64,
 };
 use cw_lib::{
   models::Token,
@@ -21,13 +23,24 @@ pub fn draw(
   _info: MessageInfo,
 ) -> Result<Response, ContractError> {
   let token = CONFIG_TOKEN.load(deps.storage)?;
-  let winners = draw_winning_addresses(deps.storage, &env)?;
   let balance = get_token_balance(deps.querier, &env.contract.address, &token)?;
+  let round_no = ROUND_COUNTER.load(deps.storage)?;
+
   let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
+
+  let (hash, winners) = draw_winning_addresses(deps.storage, &env)?;
 
   // Build SubMsgs that send rewards to winners and tax recipients.
   if !(balance.is_zero() || winners.is_empty()) {
-    resp = resp.add_submessages(send_rewards(deps.storage, &token, balance, winners)?);
+    resp = resp.add_submessages(build_transfer_submsgs(
+      deps.storage,
+      &env.block,
+      &token,
+      balance,
+      winners,
+      round_no,
+      &hash,
+    )?);
   }
 
   reset_state_for_next_round(deps.storage)?;
@@ -46,11 +59,14 @@ fn reset_state_for_next_round(storage: &mut dyn Storage) -> Result<(), ContractE
   Ok(())
 }
 
-fn send_rewards(
+fn build_transfer_submsgs(
   storage: &mut dyn Storage,
+  block: &BlockInfo,
   token: &Token,
   balance: Uint128,
   winners: Vec<Addr>,
+  round_no: Uint64,
+  winning_hash: &String,
 ) -> Result<Vec<SubMsg>, ContractError> {
   let mut balance_post_tax = balance.clone();
   let mut send_submsgs: Vec<SubMsg> = Vec::with_capacity(winners.len() + 5);
@@ -74,6 +90,7 @@ fn send_rewards(
         // Build send SubMsgs for sending winners their rewards
         send_submsgs.push(build_send_submsg(&winner_addr, win_amount, token)?);
       }
+
       // Update player account totals
       ACCOUNTS.update(
         storage,
@@ -82,6 +99,22 @@ fn send_rewards(
           if let Some(mut account) = maybe_account {
             account.win_count += 1;
             account.total_win_amount += win_amount;
+
+            // add the win, ensuring that the recent_wins
+            // vec doesn't grow beyond len 10.
+            let current_wins = &account.recent_wins;
+            if !current_wins.is_empty() {
+              let n = current_wins.len();
+              let mut new_wins = vec![PlayerWin {
+                amount: win_amount,
+                time: block.time,
+                round_no: round_no,
+                hash: winning_hash.clone(),
+              }];
+              new_wins.append(&mut current_wins[..n.min(MAX_RECENT_WINS_LEN - 1)].to_vec());
+              account.recent_wins = new_wins;
+            }
+
             Ok(account)
           } else {
             Err(ContractError::AccountNotFound)
@@ -97,17 +130,17 @@ fn send_rewards(
 fn draw_winning_addresses(
   storage: &dyn Storage,
   env: &Env,
-) -> Result<Vec<Addr>, ContractError> {
+) -> Result<(String, Vec<Addr>), ContractError> {
   let round_index = ROUND_COUNTER.load(storage)?;
   let winning_hash = build_winning_hash(storage, round_index, &env)?;
-  let winning_prefix = winning_hash;
-  Ok(
+  Ok((
+    winning_hash.clone(),
     LOOKUP_TABLE
-      .prefix(winning_prefix)
+      .prefix(winning_hash)
       .keys(storage, None, None, Order::Ascending)
       .map(|r| r.unwrap())
       .collect(),
-  )
+  ))
 }
 
 fn build_winning_hash(

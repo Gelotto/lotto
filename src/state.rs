@@ -8,10 +8,13 @@ use cw_storage_plus::{Item, Map};
 pub type TicketKey = (Addr, String);
 pub type LutabKey = (String, Addr);
 
+pub const MAX_RECENT_WINS_LEN: usize = 10;
+
 pub const CONFIG_TOKEN: Item<Token> = Item::new("token");
 pub const CONFIG_PRICE: Item<Uint128> = Item::new("price");
 pub const CONFIG_NUMBER_COUNT: Item<u8> = Item::new("number_count");
 pub const CONFIG_MAX_NUMBER: Item<u16> = Item::new("max_number");
+pub const CONFIG_MAX_TICKET_PER_ROUND: Item<u16> = Item::new("max_ticket_per_round");
 pub const CONFIG_ROUND_SECONDS: Item<Uint64> = Item::new("round_seconds");
 pub const CONFIG_MARKETING: Item<MarketingInfo> = Item::new("marketing");
 pub const CONFIG_STYLE: Item<Style> = Item::new("style");
