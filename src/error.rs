@@ -23,4 +23,7 @@ pub enum ContractError {
 
   #[error("AccountNotFound")]
   AccountNotFound,
+
+  #[error("ActiveRound")]
+  ActiveRound,
 }

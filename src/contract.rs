@@ -38,11 +38,11 @@ pub fn execute(
 #[entry_point]
 pub fn query(
   deps: Deps,
-  _env: Env,
+  env: Env,
   msg: QueryMsg,
 ) -> Result<Binary, ContractError> {
   let result = match msg {
-    QueryMsg::Select { fields, wallet } => to_binary(&query::select(deps, fields, wallet)?),
+    QueryMsg::Select { fields, wallet } => to_binary(&query::select(deps, env, fields, wallet)?),
   }?;
   Ok(result)
 }

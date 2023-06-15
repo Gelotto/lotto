@@ -2,8 +2,9 @@ use crate::{
   error::ContractError,
   models::PlayerWin,
   state::{
-    ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_TOKEN, LOOKUP_TABLE,
-    MAX_RECENT_WINS_LEN, ROUND_COUNTER, TAX_RATES, TICKETS, TICKET_COUNT,
+    ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_ROUND_SECONDS, CONFIG_TOKEN,
+    LOOKUP_TABLE, MAX_RECENT_WINS_LEN, ROUND_COUNTER, ROUND_START, TAX_RATES, TICKETS,
+    TICKET_COUNT,
   },
   util::hash_numbers,
 };
@@ -22,9 +23,11 @@ pub fn draw(
   env: Env,
   _info: MessageInfo,
 ) -> Result<Response, ContractError> {
+  authorize_draw(deps.storage, &env.block)?;
+
+  let round_no = ROUND_COUNTER.load(deps.storage)?;
   let token = CONFIG_TOKEN.load(deps.storage)?;
   let balance = get_token_balance(deps.querier, &env.contract.address, &token)?;
-  let round_no = ROUND_COUNTER.load(deps.storage)?;
 
   let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
 
@@ -46,6 +49,18 @@ pub fn draw(
   reset_state_for_next_round(deps.storage)?;
 
   Ok(resp)
+}
+
+fn authorize_draw(
+  storage: &dyn Storage,
+  block: &BlockInfo,
+) -> Result<(), ContractError> {
+  let round_start = ROUND_START.load(storage)?;
+  let round_duration = CONFIG_ROUND_SECONDS.load(storage)?;
+  if (round_start.seconds() + round_duration.u64()) > block.time.seconds() {
+    return Err(ContractError::ActiveRound);
+  }
+  Ok(())
 }
 
 fn reset_state_for_next_round(storage: &mut dyn Storage) -> Result<(), ContractError> {

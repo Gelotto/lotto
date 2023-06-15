@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Uint128, Uint64};
+use cosmwasm_std::{Addr, Timestamp, Uint128, Uint64};
 use cw_lib::models::Owner;
 
 use crate::models::{Config, PlayerAccount};
@@ -32,6 +32,10 @@ pub struct SelectResponse {
   pub owner: Option<Owner>,
   pub config: Option<Config>,
   pub round_count: Option<Uint64>,
+  pub round_start: Option<Timestamp>,
+  pub round_end: Option<Timestamp>,
+  pub ticket_count: Option<u32>,
   pub tax_rate: Option<Uint128>,
   pub account: Option<PlayerAccount>,
+  pub balance: Option<Uint128>,
 }

@@ -27,7 +27,9 @@ pub fn buy(
 
   // Process each ticket ordered, updating state
   for numbers in tickets.iter() {
-    process_ticket(deps.storage, &info, numbers.clone())?;
+    let mut sorted_numbers = numbers.clone();
+    sorted_numbers.sort();
+    process_ticket(deps.storage, &info, sorted_numbers)?;
   }
 
   // Ensure required balance & transfer_from msg if appropriate
