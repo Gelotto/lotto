@@ -8,13 +8,14 @@ use crate::{
   models::{Claim, Drawing, Payout, RoundStatus},
   state::{
     ensure_sender_is_allowed, load_drawing, load_payouts, load_winning_numbers, CLAIMS,
-    CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_ROUND_SECONDS, CONFIG_TOKEN, DRAWINGS, ROUND_NO,
-    ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES, WINNING_TICKETS,
+    CONFIG_HOUSE_ADDR, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_ROUND_SECONDS, CONFIG_TOKEN,
+    DRAWINGS, ROUND_NO, ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
+    WINNING_TICKETS,
   },
 };
 use cosmwasm_std::{
-  attr, Addr, BlockInfo, DepsMut, Env, MessageInfo, Order, Response, Storage, SubMsg, Timestamp,
-  Uint128, Uint64,
+  attr, Addr, BlockInfo, DepsMut, Env, MessageInfo, Order, Response, Storage, SubMsg, Uint128,
+  Uint64, WasmMsg,
 };
 use cw_lib::{
   models::Token,
@@ -22,6 +23,7 @@ use cw_lib::{
   utils::funds::{build_send_submsg, get_token_balance},
 };
 use cw_storage_plus::Bound;
+use house_staking::{client::House, models::AccountTokenAmount};
 
 pub const TICKET_PAGE_SIZE: usize = 500;
 
@@ -56,7 +58,7 @@ pub fn start_processing_tickets(
   // the round and prepare for the next.
   if total_ticket_count == 0 {
     resp = resp.add_attribute("is_complete", true.to_string());
-    end_draw(deps.storage, env.block.time)?;
+    end_draw(deps.storage, &env, &payouts, None)?;
     return Ok(resp);
   }
 
@@ -103,7 +105,7 @@ pub fn start_processing_tickets(
   // execution of the contract's draw function resets it to active, implying
   // that we've entered the next round.
   if drawing.is_complete() {
-    end_draw(deps.storage, env.block.time)?;
+    end_draw(deps.storage, &env, &payouts, Some(drawing.clone()))?;
   } else {
     ROUND_STATUS.save(deps.storage, &RoundStatus::Drawing)?;
   }
@@ -230,33 +232,72 @@ pub fn process_next_ticket_batch(
     &mut drawing,
   )?;
 
+  let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
+
   // Reset contract state for next round.
   if drawing.is_complete() {
-    end_draw(deps.storage, env.block.time)?;
+    if let Some(house_msg) = end_draw(deps.storage, &env, &payouts, Some(drawing.clone()))? {
+      resp = resp.add_message(house_msg);
+    }
   }
 
   // Save accumulated state changes to the Drawing
   DRAWINGS.save(deps.storage, round_no.into(), &drawing)?;
 
-  Ok(Response::new().add_attributes(vec![
-    attr("action", "draw"),
-    attr("is_complete", drawing.is_complete().to_string()),
-  ]))
+  Ok(resp.add_attribute("is_complete", drawing.is_complete().to_string()))
 }
 
 /// Clean up last round's state and increment round counter.
 pub fn end_draw(
   storage: &mut dyn Storage,
-  time: Timestamp,
-) -> Result<(), ContractError> {
+  env: &Env,
+  payouts: &HashMap<u8, Payout>,
+  maybe_drawing: Option<Drawing>,
+) -> Result<Option<WasmMsg>, ContractError> {
   ROUND_STATUS.save(storage, &RoundStatus::Active)?;
   ROUND_TICKETS.clear(storage);
-  ROUND_START.save(storage, &time)?;
+  ROUND_START.save(storage, &env.block.time)?;
   ROUND_TICKET_COUNT.save(storage, &0)?;
   ROUND_NO.update(storage, |n| -> Result<_, ContractError> {
     Ok(n + Uint64::one())
   })?;
-  Ok(())
+
+  // If maybe_drawing is None, it means that there are no tickets, so we skip
+  // the follow. In the following, we compute the total incentive amount needed
+  // for processing claims and transfer it to this contract's balance from the
+  // house.
+  if let Some(drawing) = maybe_drawing {
+    // Compute total incentive amount required for pending claims
+    let total_incentive = {
+      let mut amount = Uint128::zero();
+      for (n_matches, payout) in payouts.iter() {
+        let n_tickets = drawing.match_counts[(*n_matches) as usize];
+        if n_tickets > 0 {
+          amount += payout.incentive;
+        }
+      }
+      amount
+    };
+    // Build and return message to take incentives from house
+    if !total_incentive.is_zero() {
+      let house = House::new(&CONFIG_HOUSE_ADDR.load(storage)?);
+      return Ok(Some(
+        house.process(
+          env.contract.address.clone(),
+          None,
+          Some(AccountTokenAmount::new(
+            &env.contract.address,
+            total_incentive,
+          )),
+          None,
+          None,
+        )?[0]
+          .clone(),
+      ));
+    }
+  }
+
+  Ok(None)
 }
 
 ///
