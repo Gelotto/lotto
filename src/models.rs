@@ -13,7 +13,6 @@ pub struct Config {
   pub token: Token,
   pub price: Uint128,
   pub max_number: u16,
-  pub max_tickets_per_round: u16,
   pub number_count: u8,
   pub round_seconds: Uint64,
   pub marketing: MarketingInfo,

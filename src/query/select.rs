@@ -1,9 +1,9 @@
 use crate::error::ContractError;
 use crate::models::{Config, Round};
 use crate::state::{
-  ACCOUNTS, CONFIG_MARKETING, CONFIG_MAX_NUMBER, CONFIG_MAX_TICKETS_PER_ROUND, CONFIG_NUMBER_COUNT,
-  CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, ROUND_NO,
-  ROUND_START, ROUND_TICKETS, ROUND_TICKET_COUNT, TAX_RATES,
+  ACCOUNTS, CONFIG_MARKETING, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE,
+  CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, ROUND_NO, ROUND_START, ROUND_TICKETS,
+  ROUND_TICKET_COUNT, TAXES,
 };
 use crate::{msg::SelectResponse, state::OWNER};
 use cosmwasm_std::{Addr, Deps, Env, Order};
@@ -47,7 +47,6 @@ pub fn select(
       Ok(Some(Config {
         marketing: CONFIG_MARKETING.load(deps.storage)?,
         max_number: CONFIG_MAX_NUMBER.load(deps.storage)?,
-        max_tickets_per_round: CONFIG_MAX_TICKETS_PER_ROUND.load(deps.storage)?,
         number_count: CONFIG_NUMBER_COUNT.load(deps.storage)?,
         price: CONFIG_PRICE.load(deps.storage)?,
         style: CONFIG_STYLE.load(deps.storage)?,
@@ -62,7 +61,7 @@ pub fn select(
 
     tax_rate: loader.view("tax_rate", |_| {
       Ok(Some(
-        TAX_RATES
+        TAXES
           .range(deps.storage, None, None, Order::Ascending)
           .map(|r| r.unwrap().1)
           .sum(),

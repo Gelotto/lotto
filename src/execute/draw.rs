@@ -7,14 +7,14 @@ use crate::{
   error::ContractError,
   models::{Claim, Drawing, Payout, RoundStatus},
   state::{
-    load_drawing, load_payouts, load_winning_numbers, CLAIMS, CONFIG_MAX_NUMBER,
-    CONFIG_NUMBER_COUNT, CONFIG_ROUND_SECONDS, CONFIG_TOKEN, DRAWINGS, ROUND_NO, ROUND_START,
-    ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAX_RATES, WINNING_TICKETS,
+    ensure_sender_is_allowed, load_drawing, load_payouts, load_winning_numbers, CLAIMS,
+    CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_ROUND_SECONDS, CONFIG_TOKEN, DRAWINGS, ROUND_NO,
+    ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES, WINNING_TICKETS,
   },
 };
 use cosmwasm_std::{
-  attr, Addr, BlockInfo, DepsMut, Env, MessageInfo, Order, Response, Storage, SubMsg, Uint128,
-  Uint64,
+  attr, Addr, BlockInfo, DepsMut, Env, MessageInfo, Order, Response, Storage, SubMsg, Timestamp,
+  Uint128, Uint64,
 };
 use cw_lib::{
   models::Token,
@@ -30,8 +30,8 @@ pub fn draw(
   env: Env,
   info: MessageInfo,
 ) -> Result<Response, ContractError> {
+  ensure_sender_is_allowed(&deps.as_ref(), &info.sender, "draw")?;
   let round_no = ROUND_NO.load(deps.storage)?;
-
   match ROUND_STATUS.load(deps.storage)? {
     RoundStatus::Active => start_processing_tickets(deps, env, info, round_no),
     RoundStatus::Drawing => process_next_ticket_batch(deps, env, info, round_no),
@@ -50,11 +50,13 @@ pub fn start_processing_tickets(
   let token = CONFIG_TOKEN.load(deps.storage)?;
   let payouts = load_payouts(deps.storage)?;
   let total_ticket_count = ROUND_TICKET_COUNT.load(deps.storage)?;
-
   let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
 
+  // No need to perform any draw logic if there aren't any tickets, so just end
+  // the round and prepare for the next.
   if total_ticket_count == 0 {
     resp = resp.add_attribute("is_complete", true.to_string());
+    end_draw(deps.storage, env.block.time)?;
     return Ok(resp);
   }
 
@@ -101,7 +103,7 @@ pub fn start_processing_tickets(
   // execution of the contract's draw function resets it to active, implying
   // that we've entered the next round.
   if drawing.is_complete() {
-    end_draw(deps.storage)?;
+    end_draw(deps.storage, env.block.time)?;
   } else {
     ROUND_STATUS.save(deps.storage, &RoundStatus::Drawing)?;
   }
@@ -212,7 +214,7 @@ pub fn process_next_page(
 
 pub fn process_next_ticket_batch(
   deps: DepsMut,
-  _env: Env,
+  env: Env,
   _info: MessageInfo,
   round_no: Uint64,
 ) -> Result<Response, ContractError> {
@@ -231,7 +233,7 @@ pub fn process_next_ticket_batch(
 
   // Reset contract state for next round.
   if drawing.is_complete() {
-    end_draw(deps.storage)?;
+    end_draw(deps.storage, env.block.time)?;
   }
 
   // Save accumulated state changes to the Drawing
@@ -244,9 +246,13 @@ pub fn process_next_ticket_batch(
 }
 
 /// Clean up last round's state and increment round counter.
-pub fn end_draw(storage: &mut dyn Storage) -> Result<(), ContractError> {
+pub fn end_draw(
+  storage: &mut dyn Storage,
+  time: Timestamp,
+) -> Result<(), ContractError> {
   ROUND_STATUS.save(storage, &RoundStatus::Active)?;
   ROUND_TICKETS.clear(storage);
+  ROUND_START.save(storage, &time)?;
   ROUND_TICKET_COUNT.save(storage, &0)?;
   ROUND_NO.update(storage, |n| -> Result<_, ContractError> {
     Ok(n + Uint64::one())
@@ -279,7 +285,7 @@ fn build_tax_send_submsgs(
   // Build send SubMsgs for sending taxes
   let mut send_submsgs: Vec<SubMsg> = Vec::with_capacity(5);
   let mut total_amount = Uint128::zero();
-  for result in TAX_RATES.range(storage, None, None, Order::Ascending) {
+  for result in TAXES.range(storage, None, None, Order::Ascending) {
     let (addr, pct) = result?;
     let amount = balance.multiply_ratio(pct, Uint128::from(1_000_000u128));
     if !amount.is_zero() {

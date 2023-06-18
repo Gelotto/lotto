@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 use crate::models::{Account, Claim, Drawing, Payout, RoundStatus, Style};
 use crate::msg::InstantiateMsg;
 use crate::{error::ContractError, models::MarketingInfo};
-use cosmwasm_std::{Addr, DepsMut, Env, MessageInfo, Order, Storage, Timestamp, Uint128, Uint64};
+use cosmwasm_std::{
+  Addr, Deps, DepsMut, Env, MessageInfo, Order, Storage, Timestamp, Uint128, Uint64,
+};
+use cw_acl::client::Acl;
 use cw_lib::models::{Owner, Token};
 use cw_storage_plus::{Item, Map};
 
@@ -11,15 +14,14 @@ pub const CONFIG_TOKEN: Item<Token> = Item::new("config_token");
 pub const CONFIG_PRICE: Item<Uint128> = Item::new("config_price");
 pub const CONFIG_NUMBER_COUNT: Item<u8> = Item::new("config_number_count");
 pub const CONFIG_MAX_NUMBER: Item<u16> = Item::new("config_max_number");
-pub const CONFIG_MAX_TICKETS_PER_ROUND: Item<u16> = Item::new("config_max_tickets_per_round");
 pub const CONFIG_ROUND_SECONDS: Item<Uint64> = Item::new("config_round_seconds");
 pub const CONFIG_MARKETING: Item<MarketingInfo> = Item::new("config_marketing");
 pub const CONFIG_STYLE: Item<Style> = Item::new("config_style");
 pub const CONFIG_PAYOUTS: Map<u8, Payout> = Map::new("config_payouts");
 
 pub const OWNER: Item<Owner> = Item::new("owner");
-pub const TAX_RATES: Map<Addr, Uint128> = Map::new("tax_rates");
 pub const ACCOUNTS: Map<Addr, Account> = Map::new("accounts");
+pub const TAXES: Map<Addr, Uint128> = Map::new("taxes");
 
 pub const ROUND_STATUS: Item<RoundStatus> = Item::new("game_state");
 pub const ROUND_NO: Item<Uint64> = Item::new("round_counter");
@@ -57,12 +59,31 @@ pub fn initialize(
   CONFIG_PRICE.save(deps.storage, &msg.config.price)?;
   CONFIG_NUMBER_COUNT.save(deps.storage, &msg.config.number_count)?;
   CONFIG_MAX_NUMBER.save(deps.storage, &msg.config.max_number)?;
-  CONFIG_MAX_TICKETS_PER_ROUND.save(deps.storage, &msg.config.max_tickets_per_round)?;
   CONFIG_ROUND_SECONDS.save(deps.storage, &msg.config.round_seconds)?;
   CONFIG_MARKETING.save(deps.storage, &msg.config.marketing)?;
   CONFIG_STYLE.save(deps.storage, &msg.config.style)?;
 
   Ok(())
+}
+
+/// Helper function that returns true if given wallet (principal) is authorized
+/// by ACL to the given action.
+pub fn ensure_sender_is_allowed(
+  deps: &Deps,
+  principal: &Addr,
+  action: &str,
+) -> Result<(), ContractError> {
+  if !match OWNER.load(deps.storage)? {
+    Owner::Address(addr) => *principal == addr,
+    Owner::Acl(acl_addr) => {
+      let acl = Acl::new(&acl_addr);
+      acl.is_allowed(&deps.querier, principal, action)?
+    },
+  } {
+    Err(ContractError::NotAuthorized {})
+  } else {
+    Ok(())
+  }
 }
 
 pub fn require_active_game_state(storage: &dyn Storage) -> Result<bool, ContractError> {
