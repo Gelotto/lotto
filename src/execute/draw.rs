@@ -176,7 +176,6 @@ pub fn process_next_page(
       if claims.get(&addr).is_none() {
         let new_claim = Claim {
           round_no: round_no.into(),
-          incentive: Uint128::zero(),
           match_counts: vec![0; winning_numbers.len() + 1],
         };
         claims.insert(addr.clone(), new_claim);
@@ -273,7 +272,7 @@ pub fn end_draw(
       for (n_matches, payout) in payouts.iter() {
         let n_tickets = drawing.match_counts[(*n_matches) as usize];
         if n_tickets > 0 {
-          amount += payout.incentive;
+          amount += payout.incentive * Uint128::from(n_tickets);
         }
       }
       amount

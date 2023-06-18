@@ -75,7 +75,6 @@ pub struct Win {
 #[cw_serde]
 pub struct Claim {
   pub round_no: Uint64,
-  pub incentive: Uint128,
   pub match_counts: Vec<u16>,
 }
 

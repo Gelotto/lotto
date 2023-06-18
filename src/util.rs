@@ -34,11 +34,8 @@ pub fn calc_total_claim_amount(
     if let Some(payout) = payouts.get(&(n_matching_numbers as u8)) {
       let n_total_tickets = drawing.match_counts[n_matching_numbers] as u32;
 
-      // Add portion of incentive owed to user
-      claim_amount += payout.incentive.multiply_ratio(
-        (*n_claim_tickets) as u32 * one_mil,
-        n_total_tickets * one_mil,
-      );
+      // Add incentive owed to user
+      claim_amount += payout.incentive;
 
       // Add portion of pot owed to user
       claim_amount += mul_pct(drawing.total_balance, payout.pct).multiply_ratio(
