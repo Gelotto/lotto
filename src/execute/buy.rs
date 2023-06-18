@@ -1,15 +1,17 @@
+use std::collections::HashSet;
+
 use crate::{
   error::ContractError,
-  models::PlayerAccount,
+  models::Account,
   state::{
-    LutabKey, TicketKey, ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_PRICE, CONFIG_TOKEN, LOOKUP_TABLE,
-    TICKETS, TICKET_COUNT,
+    ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN, ROUND_NO,
+    ROUND_TICKETS, ROUND_TICKET_COUNT,
   },
   util::hash_numbers,
 };
 use cosmwasm_std::{
   attr, Addr, Coin, DepsMut, Empty, Env, MessageInfo, QuerierWrapper, Response, Storage, Uint128,
-  WasmMsg,
+  Uint64, WasmMsg,
 };
 use cw_lib::{
   models::Token,
@@ -22,14 +24,31 @@ pub fn buy(
   info: MessageInfo,
   tickets: Vec<Vec<u16>>,
 ) -> Result<Response, ContractError> {
+  // Abort if sender has tickets in ticket map from the last round they played.
+
   let ticket_price = CONFIG_PRICE.load(deps.storage)?;
+  let round_no = ROUND_NO.load(deps.storage)?;
   let total_price = Uint128::from(tickets.len() as u64) * ticket_price;
+
+  // Upsert player account
+  ACCOUNTS.update(
+    deps.storage,
+    info.sender.clone(),
+    |maybe_account| -> Result<_, ContractError> {
+      if let Some(mut account) = maybe_account {
+        account.totals.tickets += tickets.len() as u32;
+        Ok(account)
+      } else {
+        let mut account = Account::new();
+        account.totals.tickets = tickets.len() as u32;
+        Ok(account)
+      }
+    },
+  )?;
 
   // Process each ticket ordered, updating state
   for numbers in tickets.iter() {
-    let mut sorted_numbers = numbers.clone();
-    sorted_numbers.sort();
-    process_ticket(deps.storage, &info, sorted_numbers)?;
+    process_ticket(deps.storage, &info, round_no, numbers.clone())?;
   }
 
   // Ensure required balance & transfer_from msg if appropriate
@@ -54,76 +73,57 @@ pub fn buy(
 pub fn process_ticket(
   storage: &mut dyn Storage,
   info: &MessageInfo,
+  round_no: Uint64,
   numbers: Vec<u16>,
 ) -> Result<(), ContractError> {
-  require_valid_numbers(storage, &numbers)?;
+  require_valid_numbers(storage, numbers.clone())?;
 
-  // Build key into ticket map.
-  let (ticket_key, lutab_key) = build_keys(&info.sender, &numbers)?;
+  // TODO: auto-claim record exists
+
+  // sort the numbers
+  let mut sorted_numbers = numbers.clone();
+  sorted_numbers.sort();
+
+  // Build key into ticket map
+  let hash = hash_numbers(&sorted_numbers);
+  let key = (round_no.into(), info.sender.clone(), hash);
 
   // Insert the ticket or error out if the sender already has one.
-  TICKETS.update(storage, ticket_key, |x| -> Result<_, ContractError> {
+  ROUND_TICKETS.update(storage, key, |x| -> Result<_, ContractError> {
     if x.is_some() {
       Err(ContractError::TicketExists)
     } else {
-      Ok(true)
+      Ok(sorted_numbers)
     }
   })?;
 
-  // Save entry in lookup table used to draw the winners.
-  LOOKUP_TABLE.save(storage, lutab_key, &true)?;
-
   // Increase the round's current ticket count
-  TICKET_COUNT.update(storage, |n| -> Result<_, ContractError> { Ok(n + 1) })?;
-
-  // Upsert player account
-  ACCOUNTS.update(
-    storage,
-    info.sender.clone(),
-    |maybe_account| -> Result<_, ContractError> {
-      if let Some(mut account) = maybe_account {
-        account.total_ticket_count += 1;
-        Ok(account)
-      } else {
-        Ok(PlayerAccount {
-          total_ticket_count: 1,
-          win_count: 0,
-          total_win_amount: Uint128::zero(),
-          recent_wins: vec![],
-        })
-      }
-    },
-  )?;
+  ROUND_TICKET_COUNT.update(storage, |n| -> Result<_, ContractError> { Ok(n + 1) })?;
 
   Ok(())
 }
 
-fn build_keys(
-  sender: &Addr,
-  numbers: &Vec<u16>,
-) -> Result<(TicketKey, LutabKey), ContractError> {
-  let hash = hash_numbers(&numbers);
-  let ticket_key = (sender.clone(), hash.clone());
-  let lutab_key = (hash, sender.clone());
-  Ok((ticket_key, lutab_key))
-}
-
 fn require_valid_numbers(
   storage: &dyn Storage,
-  numbers: &Vec<u16>,
+  numbers: Vec<u16>,
 ) -> Result<(), ContractError> {
   // Ensure we have the right amount of numbers
-  let required_number_count = CONFIG_MAX_NUMBER.load(storage)?;
+  let required_number_count = CONFIG_NUMBER_COUNT.load(storage)?;
   if numbers.len() != required_number_count as usize {
     return Err(ContractError::InvalidNumberCount);
   }
 
   // Ensure each number is within the allowed range
   let max_value = CONFIG_MAX_NUMBER.load(storage)?;
+  let mut visited: HashSet<u16> = HashSet::with_capacity(numbers.len());
   for n in numbers.iter() {
+    if visited.contains(n) {
+      return Err(ContractError::DuplicateNumber);
+    }
     if *n > max_value {
       return Err(ContractError::NumberOutOfBounds);
     }
+    visited.insert(*n);
   }
 
   Ok(())

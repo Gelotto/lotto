@@ -1,6 +1,12 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Timestamp, Uint128, Uint64};
+use cosmwasm_std::{Addr, Timestamp, Uint128, Uint64};
 use cw_lib::models::Token;
+
+#[cw_serde]
+pub enum RoundStatus {
+  Active,
+  Drawing,
+}
 
 #[cw_serde]
 pub struct Config {
@@ -12,6 +18,22 @@ pub struct Config {
   pub round_seconds: Uint64,
   pub marketing: MarketingInfo,
   pub style: Style,
+  pub payouts: Vec<Payout>,
+}
+
+#[cw_serde]
+pub struct Payout {
+  pub n: u8,
+  pub incentive: Uint128,
+  pub pct: Uint128,
+}
+
+#[cw_serde]
+pub struct Round {
+  pub round_no: Uint64,
+  pub ticket_count: u32,
+  pub start: Timestamp,
+  pub end: Timestamp,
 }
 
 #[cw_serde]
@@ -34,17 +56,55 @@ pub enum StyleValue {
 }
 
 #[cw_serde]
-pub struct PlayerWin {
-  pub time: Timestamp,
-  pub round_no: Uint64,
-  pub amount: Uint128,
-  pub hash: String,
+pub struct Drawing {
+  pub total_ticket_count: u32,
+  pub total_balance: Uint128,
+  pub processed_ticket_count: u32,
+  pub cursor: Option<(u64, Addr, String)>,
+  pub winning_numbers: Vec<u16>,
+  pub match_counts: Vec<u16>,
 }
 
 #[cw_serde]
-pub struct PlayerAccount {
-  pub win_count: u32,
-  pub total_ticket_count: u32,
-  pub total_win_amount: Uint128,
-  pub recent_wins: Vec<PlayerWin>,
+pub struct Win {
+  pub tickets: Vec<Vec<u16>>,
+  pub amount: Uint128,
+  pub round_no: Uint64,
+}
+
+#[cw_serde]
+pub struct Claim {
+  pub round_no: Uint64,
+  pub incentive: Uint128,
+  pub match_counts: Vec<u16>,
+}
+
+#[cw_serde]
+pub struct AccountTotals {
+  pub wins: u32,
+  pub winnings: Uint128,
+  pub tickets: u32,
+}
+
+#[cw_serde]
+pub struct Account {
+  pub totals: AccountTotals,
+}
+
+impl Account {
+  pub fn new() -> Self {
+    Self {
+      totals: AccountTotals {
+        wins: 0,
+        winnings: Uint128::zero(),
+        tickets: 0,
+      },
+    }
+  }
+}
+
+impl Drawing {
+  pub fn is_complete(&self) -> bool {
+    self.total_ticket_count == self.processed_ticket_count
+  }
 }

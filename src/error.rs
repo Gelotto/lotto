@@ -15,15 +15,33 @@ pub enum ContractError {
   #[error("InvalidNumberCount")]
   InvalidNumberCount,
 
+  #[error("DuplicateNumber")]
+  DuplicateNumber,
+
   #[error("NumberOutOfBounds")]
   NumberOutOfBounds,
 
   #[error("InsufficientFunds")]
   InsufficientFunds,
 
+  #[error("AlreadyClaimed")]
+  AlreadyClaimed,
+
+  #[error("ClaimNotFound")]
+  ClaimNotFound,
+
   #[error("AccountNotFound")]
   AccountNotFound,
 
+  #[error("DrawingNotFound")]
+  DrawingNotFound,
+
   #[error("ActiveRound")]
   ActiveRound,
+
+  #[error("InvalidRoundNo")]
+  InvalidRoundNo,
+
+  #[error("InvalidGameState")]
+  InvalidGameState,
 }

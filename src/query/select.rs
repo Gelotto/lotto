@@ -1,9 +1,9 @@
 use crate::error::ContractError;
-use crate::models::Config;
+use crate::models::{Config, Round};
 use crate::state::{
   ACCOUNTS, CONFIG_MARKETING, CONFIG_MAX_NUMBER, CONFIG_MAX_TICKETS_PER_ROUND, CONFIG_NUMBER_COUNT,
-  CONFIG_PRICE, CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, ROUND_COUNTER, ROUND_START,
-  TAX_RATES, TICKET_COUNT,
+  CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, ROUND_NO,
+  ROUND_START, ROUND_TICKETS, ROUND_TICKET_COUNT, TAX_RATES,
 };
 use crate::{msg::SelectResponse, state::OWNER};
 use cosmwasm_std::{Addr, Deps, Env, Order};
@@ -18,18 +18,23 @@ pub fn select(
 ) -> Result<SelectResponse, ContractError> {
   let loader = Repository::loader(deps.storage, &maybe_fields, &maybe_account);
 
+  let round_no = ROUND_NO.load(deps.storage)?;
   let round_seconds = CONFIG_ROUND_SECONDS.load(deps.storage)?;
   let round_start = ROUND_START.load(deps.storage)?;
   let token = CONFIG_TOKEN.load(deps.storage)?;
 
   Ok(SelectResponse {
     owner: loader.get("owner", &OWNER)?,
-    round_count: loader.get("round_count", &ROUND_COUNTER)?,
-    ticket_count: loader.get("ticket_count", &TICKET_COUNT)?,
-    round_start: Some(round_start),
-    round_end: loader.view("round_end", |_| {
-      Ok(Some(round_start.plus_seconds(round_seconds.into())))
+
+    round: loader.view("round", |_| {
+      Ok(Some(Round {
+        start: round_start.clone(),
+        end: round_start.plus_seconds(round_seconds.into()),
+        ticket_count: ROUND_TICKET_COUNT.load(deps.storage)?,
+        round_no,
+      }))
     })?,
+
     balance: loader.view("balance", |_| {
       Ok(Some(get_token_balance(
         deps.querier,
@@ -37,6 +42,7 @@ pub fn select(
         &token,
       )?))
     })?,
+
     config: loader.view("config", |_| {
       Ok(Some(Config {
         marketing: CONFIG_MARKETING.load(deps.storage)?,
@@ -47,8 +53,13 @@ pub fn select(
         style: CONFIG_STYLE.load(deps.storage)?,
         token: token.clone(),
         round_seconds,
+        payouts: CONFIG_PAYOUTS
+          .range(deps.storage, None, None, Order::Ascending)
+          .map(|r| r.unwrap().1)
+          .collect(),
       }))
     })?,
+
     tax_rate: loader.view("tax_rate", |_| {
       Ok(Some(
         TAX_RATES
@@ -57,9 +68,23 @@ pub fn select(
           .sum(),
       ))
     })?,
+
     account: loader.view("account", |maybe_addr| {
       if let Some(addr) = maybe_addr {
         return Ok(ACCOUNTS.may_load(deps.storage, addr.clone())?);
+      }
+      Ok(None)
+    })?,
+
+    tickets: loader.view("tickets", |maybe_addr| {
+      if let Some(addr) = maybe_addr {
+        return Ok(Some(
+          ROUND_TICKETS
+            .prefix((round_no.into(), addr))
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|r| r.unwrap().1)
+            .collect(),
+        ));
       }
       Ok(None)
     })?,
