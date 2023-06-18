@@ -17,6 +17,7 @@ pub const CONFIG_MAX_NUMBER: Item<u16> = Item::new("config_max_number");
 pub const CONFIG_ROUND_SECONDS: Item<Uint64> = Item::new("config_round_seconds");
 pub const CONFIG_MARKETING: Item<MarketingInfo> = Item::new("config_marketing");
 pub const CONFIG_STYLE: Item<Style> = Item::new("config_style");
+pub const CONFIG_HOUSE_ADDR: Item<Addr> = Item::new("config_house_address");
 pub const CONFIG_PAYOUTS: Map<u8, Payout> = Map::new("config_payouts");
 
 pub const OWNER: Item<Owner> = Item::new("owner");
@@ -61,6 +62,7 @@ pub fn initialize(
   CONFIG_MAX_NUMBER.save(deps.storage, &msg.config.max_number)?;
   CONFIG_ROUND_SECONDS.save(deps.storage, &msg.config.round_seconds)?;
   CONFIG_MARKETING.save(deps.storage, &msg.config.marketing)?;
+  CONFIG_HOUSE_ADDR.save(deps.storage, &msg.config.house_address)?;
   CONFIG_STYLE.save(deps.storage, &msg.config.style)?;
 
   Ok(())

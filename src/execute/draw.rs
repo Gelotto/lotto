@@ -183,8 +183,7 @@ pub fn process_next_page(
     };
 
     // Increment claim amount by base payout incentive.
-    if let Some(payout) = payouts.get(&n_matches) {
-      claim.incentive += payout.incentive;
+    if payouts.contains_key(&n_matches) {
       claim.match_counts[n_matches as usize] += 1;
     }
 

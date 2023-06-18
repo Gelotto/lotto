@@ -1,9 +1,9 @@
 use crate::error::ContractError;
 use crate::models::{Config, Round};
 use crate::state::{
-  ACCOUNTS, CONFIG_MARKETING, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE,
-  CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, ROUND_NO, ROUND_START, ROUND_TICKETS,
-  ROUND_TICKET_COUNT, TAXES,
+  ACCOUNTS, CONFIG_HOUSE_ADDR, CONFIG_MARKETING, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT,
+  CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, ROUND_NO,
+  ROUND_START, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
 };
 use crate::{msg::SelectResponse, state::OWNER};
 use cosmwasm_std::{Addr, Deps, Env, Order};
@@ -50,6 +50,7 @@ pub fn select(
         number_count: CONFIG_NUMBER_COUNT.load(deps.storage)?,
         price: CONFIG_PRICE.load(deps.storage)?,
         style: CONFIG_STYLE.load(deps.storage)?,
+        house_address: CONFIG_HOUSE_ADDR.load(deps.storage)?,
         token: token.clone(),
         round_seconds,
         payouts: CONFIG_PAYOUTS

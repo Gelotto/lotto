@@ -15,6 +15,7 @@ pub struct Config {
   pub max_number: u16,
   pub number_count: u8,
   pub round_seconds: Uint64,
+  pub house_address: Addr,
   pub marketing: MarketingInfo,
   pub style: Style,
   pub payouts: Vec<Payout>,
