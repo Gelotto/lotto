@@ -88,12 +88,15 @@ pub fn process_ticket(
   let hash = hash_numbers(&sorted_numbers);
   let key = (round_no.into(), info.sender.clone(), hash);
 
-  // Insert the ticket or error out if the sender already has one.
+  // Insert the ticket or error out if the sender already has one.  NOTE: While
+  // the ticket number hash is sorted, the vec stored in the map's values is
+  // not. This can hypothetically let us check whether the ticket matches with
+  // respect to order (permutations rather than combinations).
   ROUND_TICKETS.update(storage, key, |x| -> Result<_, ContractError> {
     if x.is_some() {
       Err(ContractError::TicketExists)
     } else {
-      Ok(sorted_numbers)
+      Ok(numbers)
     }
   })?;
 
