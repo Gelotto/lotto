@@ -4,19 +4,20 @@ use crate::{
   error::ContractError,
   models::Account,
   state::{
-    ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN, ROUND_NO,
-    ROUND_TICKETS, ROUND_TICKET_COUNT,
+    load_house, ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN,
+    HOUSE_REVENUE_PCT, ROUND_TICKETS, ROUND_TICKET_COUNT,
   },
-  util::hash_numbers,
+  util::{hash_numbers, mul_pct},
 };
 use cosmwasm_std::{
   attr, Addr, Coin, DepsMut, Empty, Env, MessageInfo, QuerierWrapper, Response, Storage, Uint128,
-  Uint64, WasmMsg,
+  WasmMsg,
 };
 use cw_lib::{
   models::Token,
   utils::funds::{build_cw20_transfer_from_msg, get_cw20_balance, has_funds},
 };
+use house_staking::models::AccountTokenAmount;
 
 pub fn buy(
   deps: DepsMut,
@@ -24,11 +25,12 @@ pub fn buy(
   info: MessageInfo,
   tickets: Vec<Vec<u16>>,
 ) -> Result<Response, ContractError> {
-  // Abort if sender has tickets in ticket map from the last round they played.
-
   let ticket_price = CONFIG_PRICE.load(deps.storage)?;
-  let round_no = ROUND_NO.load(deps.storage)?;
   let total_price = Uint128::from(tickets.len() as u64) * ticket_price;
+  let house_revenue = mul_pct(total_price, HOUSE_REVENUE_PCT.into());
+  let token = CONFIG_TOKEN.load(deps.storage)?;
+
+  // TODO: process any outstanding claim
 
   // Upsert player account
   ACCOUNTS.update(
@@ -48,32 +50,46 @@ pub fn buy(
 
   // Process each ticket ordered, updating state
   for numbers in tickets.iter() {
-    process_ticket(deps.storage, &info, round_no, numbers.clone())?;
+    process_ticket(deps.storage, &info, numbers.clone())?;
   }
 
-  // Ensure required balance & transfer_from msg if appropriate
-  let resp = Response::new().add_attributes(vec![attr("action", "buy")]);
+  let mut resp = Response::new().add_attributes(vec![attr("action", "buy")]);
+  let house = load_house(deps.storage)?;
 
-  Ok(
-    if let Some(msg) = take_payment(
-      deps.storage,
-      deps.querier,
+  // Ensure funds and take payment from sender
+  if let Some(msg) = take_payment(
+    deps.storage,
+    deps.querier,
+    &env.contract.address,
+    &info.funds,
+    &info.sender,
+    total_price,
+  )? {
+    resp = resp.add_message(msg);
+  };
+
+  // Send the house its revenue
+  resp = resp.add_messages(house.process(
+    info.sender,
+    Some(AccountTokenAmount::new(
       &env.contract.address,
-      &info.funds,
-      &info.sender,
-      total_price,
-    )? {
-      resp.add_message(msg)
+      house_revenue,
+    )),
+    None,
+    Some(info.funds),
+    if let Token::Cw20 { address } = token {
+      Some(address)
     } else {
-      resp
+      None
     },
-  )
+  )?);
+
+  Ok(resp)
 }
 
 pub fn process_ticket(
   storage: &mut dyn Storage,
   info: &MessageInfo,
-  round_no: Uint64,
   numbers: Vec<u16>,
 ) -> Result<(), ContractError> {
   require_valid_numbers(storage, numbers.clone())?;
@@ -86,7 +102,7 @@ pub fn process_ticket(
 
   // Build key into ticket map
   let hash = hash_numbers(&sorted_numbers);
-  let key = (round_no.into(), info.sender.clone(), hash);
+  let key = (info.sender.clone(), hash);
 
   // Insert the ticket or error out if the sender already has one.  NOTE: While
   // the ticket number hash is sorted, the vec stored in the map's values is

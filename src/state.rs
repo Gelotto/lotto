@@ -9,6 +9,9 @@ use cosmwasm_std::{
 use cw_acl::client::Acl;
 use cw_lib::models::{Owner, Token};
 use cw_storage_plus::{Item, Map};
+use house_staking::client::House;
+
+pub const HOUSE_REVENUE_PCT: u128 = 50000; // == 5%
 
 pub const CONFIG_TOKEN: Item<Token> = Item::new("config_token");
 pub const CONFIG_PRICE: Item<Uint128> = Item::new("config_price");
@@ -23,16 +26,17 @@ pub const CONFIG_PAYOUTS: Map<u8, Payout> = Map::new("config_payouts");
 pub const OWNER: Item<Owner> = Item::new("owner");
 pub const ACCOUNTS: Map<Addr, Account> = Map::new("accounts");
 pub const TAXES: Map<Addr, Uint128> = Map::new("taxes");
+pub const DEBUG_WINNING_NUMBERS: Item<Option<Vec<u16>>> = Item::new("debug_winning_numbers");
 
 pub const ROUND_STATUS: Item<RoundStatus> = Item::new("game_state");
 pub const ROUND_NO: Item<Uint64> = Item::new("round_counter");
 pub const ROUND_START: Item<Timestamp> = Item::new("round_start");
 pub const ROUND_TICKET_COUNT: Item<u32> = Item::new("round_ticket_count");
-pub const ROUND_TICKETS: Map<(u64, Addr, String), Vec<u16>> = Map::new("round_tickets");
+pub const ROUND_TICKETS: Map<(Addr, String), Vec<u16>> = Map::new("round_tickets");
 
 pub const CLAIMS: Map<Addr, Claim> = Map::new("claims");
 pub const DRAWINGS: Map<u64, Drawing> = Map::new("drawings");
-pub const WINNING_TICKETS: Map<(u64, Addr, String), Vec<u16>> = Map::new("winning_tickets");
+pub const WINNING_TICKETS: Map<(Addr, String), Vec<u16>> = Map::new("winning_tickets");
 
 pub fn initialize(
   deps: DepsMut,
@@ -65,6 +69,8 @@ pub fn initialize(
   CONFIG_HOUSE_ADDR.save(deps.storage, &msg.config.house_address)?;
   CONFIG_STYLE.save(deps.storage, &msg.config.style)?;
 
+  DEBUG_WINNING_NUMBERS.save(deps.storage, &msg.winning_numbers)?;
+
   Ok(())
 }
 
@@ -90,6 +96,10 @@ pub fn ensure_sender_is_allowed(
 
 pub fn require_active_game_state(storage: &dyn Storage) -> Result<bool, ContractError> {
   Ok(ROUND_STATUS.load(storage)? == RoundStatus::Active)
+}
+
+pub fn load_house(storage: &dyn Storage) -> Result<House, ContractError> {
+  Ok(House::new(&CONFIG_HOUSE_ADDR.load(storage)?))
 }
 
 pub fn load_account(

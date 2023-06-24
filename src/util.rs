@@ -31,8 +31,10 @@ pub fn calc_total_claim_amount(
       // Add incentive owed to user
       claim_amount += payout.incentive;
 
+      // TODO: Add step-up amount
+
       // Add portion of pot owed to user
-      claim_amount += mul_pct(drawing.total_balance, payout.pct).multiply_ratio(
+      claim_amount += mul_pct(drawing.balance, payout.pct).multiply_ratio(
         (*n_claim_tickets) as u128 * ONE_MILLION,
         (n_total_tickets as u128) * ONE_MILLION,
       );

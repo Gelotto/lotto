@@ -31,7 +31,7 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
   match msg {
     ExecuteMsg::Buy { tickets } => execute::buy(deps, env, info, tickets),
-    ExecuteMsg::Draw {} => todo!(),
+    ExecuteMsg::Draw {} => execute::draw(deps, env, info),
   }
 }
 
@@ -43,6 +43,7 @@ pub fn query(
 ) -> Result<Binary, ContractError> {
   let result = match msg {
     QueryMsg::Select { fields, wallet } => to_binary(&query::select(deps, env, fields, wallet)?),
+    QueryMsg::Drawing { round_no } => to_binary(&query::drawing(deps, round_no)?),
   }?;
   Ok(result)
 }

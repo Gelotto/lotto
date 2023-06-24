@@ -1,5 +1,5 @@
-mod claim;
+mod drawing;
 mod select;
 
-pub use claim::claim;
+pub use drawing::drawing;
 pub use select::select;

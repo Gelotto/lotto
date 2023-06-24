@@ -57,10 +57,11 @@ pub enum StyleValue {
 
 #[cw_serde]
 pub struct Drawing {
-  pub total_ticket_count: u32,
-  pub total_balance: Uint128,
+  pub ticket_count: u32,
+  pub balance: Uint128,
+  pub total_payout: Uint128,
   pub processed_ticket_count: u32,
-  pub cursor: Option<(u64, Addr, String)>,
+  pub cursor: Option<(Addr, String)>,
   pub winning_numbers: Vec<u16>,
   pub match_counts: Vec<u16>,
 }
@@ -104,6 +105,6 @@ impl Account {
 
 impl Drawing {
   pub fn is_complete(&self) -> bool {
-    self.total_ticket_count == self.processed_ticket_count
+    self.ticket_count == self.processed_ticket_count
   }
 }

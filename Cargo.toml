@@ -40,7 +40,7 @@ thiserror = { version = "1.0.40" }
 cw_repository = { version = "0.0.3", path = "../cw-repository", features = ["library"] }
 cw-acl = { version = "0.0.4", path = "../cw-acl", features = ["library"] }
 cw-lib = { version = "0.1.0", path = "../cw-lib" }
-house-staking = { version = "0.0.2", path = "../house-staking", features = ["library"] }
+house-staking = { version = "0.0.3", path = "../house-staking", features = ["library"] }
 
 [dev-dependencies]
 cw-multi-test = { version = "0.16.4" }

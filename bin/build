@@ -6,4 +6,5 @@ docker run --rm -v "$(pwd)":/code \
   --mount type=bind,source="$(realpath ../cw-lib)",target=/cw-lib \
   --mount type=bind,source="$(realpath ../cw-acl)",target=/cw-acl \
   --mount type=bind,source="$(realpath ../cw-repository)",target=/cw-repository \
+  --mount type=bind,source="$(realpath ../house-staking)",target=/house-staking \
   cosmwasm/rust-optimizer:0.12.13
