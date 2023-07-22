@@ -5,7 +5,7 @@ use crate::{
   models::Account,
   state::{
     load_house, ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN,
-    HOUSE_REVENUE_PCT, ROUND_TICKETS, ROUND_TICKET_COUNT,
+    HOUSE_TICKET_TAX_PCT, ROUND_TICKETS, ROUND_TICKET_COUNT,
   },
   util::{hash_numbers, mul_pct},
 };
@@ -27,7 +27,7 @@ pub fn buy(
 ) -> Result<Response, ContractError> {
   let ticket_price = CONFIG_PRICE.load(deps.storage)?;
   let total_price = Uint128::from(tickets.len() as u64) * ticket_price;
-  let house_revenue = mul_pct(total_price, HOUSE_REVENUE_PCT.into());
+  let house_take = mul_pct(total_price, HOUSE_TICKET_TAX_PCT.into());
   let token = CONFIG_TOKEN.load(deps.storage)?;
 
   // TODO: process any outstanding claim
@@ -68,13 +68,10 @@ pub fn buy(
     resp = resp.add_message(msg);
   };
 
-  // Send the house its revenue
+  // Send the house its revenue (5% of ticket proceeds)
   resp = resp.add_messages(house.process(
     info.sender,
-    Some(AccountTokenAmount::new(
-      &env.contract.address,
-      house_revenue,
-    )),
+    Some(AccountTokenAmount::new(&env.contract.address, house_take)),
     None,
     Some(info.funds),
     if let Token::Cw20 { address } = token {

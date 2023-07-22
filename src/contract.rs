@@ -7,7 +7,7 @@ use cosmwasm_std::entry_point;
 use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response};
 use cw2::set_contract_version;
 
-const CONTRACT_NAME: &str = "crates.io:cw-contract-template";
+const CONTRACT_NAME: &str = "crates.io:lotto";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[entry_point]
@@ -32,6 +32,7 @@ pub fn execute(
   match msg {
     ExecuteMsg::Buy { tickets } => execute::buy(deps, env, info, tickets),
     ExecuteMsg::Draw {} => execute::draw(deps, env, info),
+    ExecuteMsg::Claim {} => execute::claim(deps, env, info),
   }
 }
 
@@ -44,6 +45,7 @@ pub fn query(
   let result = match msg {
     QueryMsg::Select { fields, wallet } => to_binary(&query::select(deps, env, fields, wallet)?),
     QueryMsg::Drawing { round_no } => to_binary(&query::drawing(deps, round_no)?),
+    QueryMsg::Ready => to_binary(&query::ready(deps, env)?),
   }?;
   Ok(result)
 }

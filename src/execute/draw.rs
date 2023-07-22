@@ -7,10 +7,10 @@ use crate::{
   error::ContractError,
   models::{Claim, Drawing, Payout, RoundStatus},
   state::{
-    ensure_sender_is_allowed, load_drawing, load_payouts, load_winning_numbers, CLAIMS,
-    CONFIG_HOUSE_ADDR, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_ROUND_SECONDS, CONFIG_TOKEN,
-    DEBUG_WINNING_NUMBERS, DRAWINGS, ROUND_NO, ROUND_START, ROUND_STATUS, ROUND_TICKETS,
-    ROUND_TICKET_COUNT, TAXES, WINNING_TICKETS,
+    load_drawing, load_payouts, load_tickets_by_account, load_winning_numbers, CLAIMS,
+    CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE, CONFIG_NUMBER_COUNT,
+    CONFIG_ROLLING, CONFIG_ROUND_SECONDS, CONFIG_TOKEN, DEBUG_WINNING_NUMBERS, DRAWINGS, ROUND_NO,
+    ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
   },
   util::mul_pct,
 };
@@ -33,7 +33,9 @@ pub fn draw(
   env: Env,
   info: MessageInfo,
 ) -> Result<Response, ContractError> {
-  ensure_sender_is_allowed(&deps.as_ref(), &info.sender, "draw")?;
+  if info.sender != CONFIG_DRAWER.load(deps.storage)? {
+    return Err(ContractError::NotAuthorized);
+  }
   let round_no = ROUND_NO.load(deps.storage)?;
   match ROUND_STATUS.load(deps.storage)? {
     RoundStatus::Active => start_processing_tickets(deps, env, info, round_no),
@@ -63,7 +65,7 @@ pub fn start_processing_tickets(
   // the round and prepare for the next.
   if ticket_count == 0 {
     resp = resp.add_attribute("is_complete", true.to_string());
-    reset_round_state(deps.storage, &env)?;
+    reset_round_state(deps.storage, &env, ticket_count)?;
     return Ok(resp);
   }
 
@@ -102,11 +104,15 @@ pub fn start_processing_tickets(
   let mut drawing = Drawing {
     ticket_count,
     balance: post_tax_balance,
+    start_balance: CONFIG_MIN_BALANCE.load(deps.storage)?,
     winning_numbers: winning_numbers.iter().map(|x| *x).collect(),
     match_counts: vec![0; winning_numbers.len() + 1],
     processed_ticket_count: 0,
     total_payout: Uint128::zero(),
+    pot_payout: Uint128::zero(),
+    incentive_payout: Uint128::zero(),
     cursor: None,
+    round_no: None,
   };
 
   deps
@@ -129,14 +135,16 @@ pub fn start_processing_tickets(
   // that we've entered the next round.
   if drawing.is_complete() {
     deps.api.debug(format!(">>> calling end_draw").as_str());
-    end_draw(
+    if let Some(house_msgs) = end_draw(
       deps.storage,
       deps.api,
       &env,
       &info.funds,
       &payouts,
       &mut drawing,
-    )?;
+    )? {
+      resp = resp.add_messages(house_msgs);
+    }
   } else {
     ROUND_STATUS.save(deps.storage, &RoundStatus::Drawing)?;
   }
@@ -172,10 +180,6 @@ pub fn process_next_page(
   // as a cursor (for pagination):
   let mut cursor: Option<(Addr, String)> = None;
 
-  // In-memory accumulator of winning tickets. These are saved back to the
-  // WINNING_TICKETS Map at the end of this procedure:
-  let mut winning_tickets: HashMap<(Addr, String), Vec<u16>> = HashMap::with_capacity(8);
-
   // This vec represents a frequency distribution, where each vec positional
   // index corresponds to a possible number of matching numbers that a ticket
   // can have. The value at each index is the number of times a ticket with this
@@ -207,31 +211,25 @@ pub fn process_next_page(
     match_counts[n_matching_numbers as usize] += 1;
     processed_ticket_count += 1;
 
-    // Upsert a Claim record for this ticket's owner,
-    // incrementing its match counts
-    let claim: &mut Claim = {
-      if claims.get(&addr).is_none() {
-        let new_claim = Claim {
-          round_no: round_no.into(),
-          match_counts: vec![0; winning_numbers.len() + 1],
-        };
-        claims.insert(addr.clone(), new_claim);
-      };
-      claims.get_mut(&addr).unwrap()
-    };
-
     // Increment claim amount by base payout incentive.
-    if payouts.contains_key(&n_matching_numbers) {
-      claim.match_counts[n_matching_numbers as usize] += 1;
+    // Save a record of the owner's winning ticket numbers.
+    if let Some(_) = payouts.get(&n_matching_numbers) {
+      // Upsert a Claim record for this ticket's owner,
+      // incrementing its match counts
+      let claim: &mut Claim = {
+        if claims.get(&addr).is_none() {
+          let new_claim = Claim {
+            round_no: round_no.into(),
+            tickets: load_tickets_by_account(storage, &addr)?,
+            matches: vec![0; winning_numbers.len() + 1],
+            amount: None,
+          };
+          claims.insert(addr.clone(), new_claim);
+        };
+        claims.get_mut(&addr).unwrap()
+      };
+      claim.matches[n_matching_numbers as usize] += 1;
     }
-
-    // Save a record of the owner's winning ticket numbers
-    winning_tickets.insert((addr, hash), numbers);
-  }
-
-  // Finally, save the accumulated winning tickets.
-  for ((addr, hash), v) in winning_tickets.iter() {
-    WINNING_TICKETS.save(storage, (addr.clone(), hash.clone()), v)?;
   }
 
   // Save new or updated Claims.
@@ -273,7 +271,7 @@ pub fn process_next_ticket_batch(
 
   // Reset contract state for next round.
   if drawing.is_complete() {
-    if let Some(house_msg) = end_draw(
+    if let Some(house_msgs) = end_draw(
       deps.storage,
       deps.api,
       &env,
@@ -281,7 +279,7 @@ pub fn process_next_ticket_batch(
       &payouts,
       &mut drawing,
     )? {
-      resp = resp.add_message(house_msg);
+      resp = resp.add_messages(house_msgs);
     }
   }
 
@@ -294,27 +292,33 @@ pub fn process_next_ticket_batch(
 pub fn reset_round_state(
   storage: &mut dyn Storage,
   env: &Env,
+  current_ticket_count: u32,
 ) -> Result<(), ContractError> {
   ROUND_STATUS.save(storage, &RoundStatus::Active)?;
-  ROUND_TICKETS.clear(storage);
   ROUND_START.save(storage, &env.block.time)?;
-  ROUND_TICKET_COUNT.save(storage, &0)?;
-  ROUND_NO.update(storage, |n| -> Result<_, ContractError> {
-    Ok(n + Uint64::one())
-  })?;
+  // only bother clearing round state data structures if any tickets were sold
+  if current_ticket_count > 0 {
+    ROUND_TICKETS.clear(storage);
+    ROUND_TICKET_COUNT.save(storage, &0)?;
+    ROUND_NO.update(storage, |n| -> Result<_, ContractError> {
+      Ok(n + Uint64::one())
+    })?;
+  }
   Ok(())
 }
 
 /// Clean up last round's state and increment round counter.
 pub fn end_draw(
   storage: &mut dyn Storage,
-  _api: &dyn Api,
+  api: &dyn Api,
   env: &Env,
   funds: &Vec<Coin>,
   payouts: &HashMap<u8, Payout>,
   drawing: &mut Drawing,
-) -> Result<Option<WasmMsg>, ContractError> {
-  reset_round_state(storage, env)?;
+) -> Result<Option<Vec<WasmMsg>>, ContractError> {
+  let ticket_count = ROUND_TICKET_COUNT.load(storage)?;
+
+  reset_round_state(storage, env, ticket_count)?;
 
   // If maybe_drawing is None, it means that there are no tickets, so we skip
   // the follow.
@@ -322,26 +326,31 @@ pub fn end_draw(
   // Otherwise, we compute the total incentive needed for processing claims and
   // transfer it to this contract's balance from the house.
   // Compute total incentive amount required for pending claims
-  let payout_amount = {
-    let mut amount = Uint128::zero();
+  let (incentive_payout, pot_payout) = {
+    let mut incentive_amount = Uint128::zero();
+    let mut pot_amount = Uint128::zero();
+    let pot_size = drawing.get_pot_size();
     for (n_matches, payout) in payouts.iter() {
       let n_tickets = drawing.match_counts[(*n_matches) as usize];
       if n_tickets > 0 {
         // increment payout amount by incentive
         if !payout.incentive.is_zero() {
-          amount += payout.incentive * Uint128::from(n_tickets);
+          incentive_amount += payout.incentive * Uint128::from(n_tickets);
         }
-        // increment payout by pot percent
         if !payout.pct.is_zero() {
-          amount += mul_pct(drawing.balance, payout.pct);
+          pot_amount += mul_pct(pot_size, payout.pct);
         }
       }
     }
-    amount
+    (incentive_amount, pot_amount)
   };
 
-  drawing.total_payout = payout_amount;
+  drawing.pot_payout = pot_payout;
+  drawing.incentive_payout = incentive_payout;
+  drawing.total_payout = incentive_payout + pot_payout;
+  drawing.cursor = None;
 
+  // Get CW20 address for house process msg
   let token = CONFIG_TOKEN.load(storage)?;
   let maybe_token_addr = if let Token::Cw20 { address } = token {
     Some(address)
@@ -349,28 +358,57 @@ pub fn end_draw(
     None
   };
 
-  // Build and return message to take incentives from house
-  if !payout_amount.is_zero() {
-    let house = House::new(&CONFIG_HOUSE_ADDR.load(storage)?);
-    return Ok(Some(
-      house.process(
-        env.contract.address.clone(),
-        Some(AccountTokenAmount::new(
-          &env.contract.address,
-          drawing.balance,
-        )),
-        Some(AccountTokenAmount::new(
-          &env.contract.address,
-          payout_amount,
-        )),
-        Some(funds.clone()),
-        maybe_token_addr,
-      )?[0]
-        .clone(),
-    ));
+  // Build message to take incentives from house
+  let is_rolling = CONFIG_ROLLING.load(storage)?;
+  let total_payout_after_tax = drawing.get_total_payout_after_tax();
+  let has_surplus_balance = drawing.balance > total_payout_after_tax;
+  let total_outgoing = total_payout_after_tax;
+  let mut total_incoming = Uint128::zero();
+
+  if !is_rolling {
+    // if the lottery doesn't roll its balance into the next round, then the
+    // house takes all surplus balance on top of what it's already taking as
+    // tax.
+    total_incoming = drawing.balance;
+  } else if has_surplus_balance {
+    // if we're at a surplus after payout, just send the house it's taxes and
+    // keep the rest to "roll over" into next round
+    api.debug(
+      format!(
+        ">>> surplus balance: {:?}",
+        drawing.balance - total_payout_after_tax
+      )
+      .as_str(),
+    );
+    total_incoming = drawing.get_total_payout();
+  } else {
+    // we're rolling over but don't have any surplus balance, which means we
+    // need the house to pay out as much or more than we are sending into it,
+    // so in this case, we just send in everything we've got.
+    total_incoming += drawing.balance;
   }
 
-  Ok(None)
+  api.debug(format!(">>> {:?}", drawing).as_str());
+  api.debug(format!(">>> house incoming : {:?}", total_incoming).as_str());
+  api.debug(format!(">>> house outgoing: {:?}", total_outgoing).as_str());
+
+  let house = House::new(&CONFIG_HOUSE_ADDR.load(storage)?);
+
+  return Ok(Some(house.process(
+    env.contract.address.clone(),
+    // Incoming to house:
+    Some(AccountTokenAmount::new(
+      &env.contract.address,
+      total_incoming,
+    )),
+    // Outgoing from house:
+    Some(AccountTokenAmount::new(
+      &env.contract.address,
+      total_outgoing,
+    )),
+    Some(funds.clone()),
+    maybe_token_addr,
+  )?));
 }
 
 ///

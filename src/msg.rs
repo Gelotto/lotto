@@ -2,7 +2,7 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Uint128, Uint64};
 use cw_lib::models::Owner;
 
-use crate::models::{AccountTotals, Config, Round};
+use crate::models::{AccountTotals, Claim, Config, Round};
 
 #[cw_serde]
 pub struct InstantiateMsg {
@@ -15,12 +15,14 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
   Buy { tickets: Vec<Vec<u16>> },
   Draw {},
+  Claim {},
 }
 
 #[cw_serde]
 pub enum QueryMsg {
+  Ready,
   Drawing {
-    round_no: Uint64,
+    round_no: Option<Uint64>,
   },
   Select {
     fields: Option<Vec<String>>,
@@ -32,17 +34,10 @@ pub enum QueryMsg {
 pub struct MigrateMsg {}
 
 #[cw_serde]
-pub struct ClaimView {
-  pub round_no: Uint64,
-  pub amount: Uint128,
-  pub winning_tickets: Vec<Vec<u16>>,
-}
-
-#[cw_serde]
 pub struct AccountView {
   pub totals: AccountTotals,
   pub tickets: Vec<Vec<u16>>,
-  pub claim: Option<ClaimView>,
+  pub claim: Option<Claim>,
 }
 
 #[cw_serde]

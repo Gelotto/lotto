@@ -30,7 +30,7 @@ pub fn claim(
     |maybe_account| -> Result<_, ContractError> {
       if let Some(mut account) = maybe_account {
         account.totals.winnings = claim_amount;
-        account.totals.wins += claim.match_counts.iter().map(|x| *x as u32).sum::<u32>();
+        account.totals.wins += claim.matches.iter().map(|x| *x as u32).sum::<u32>();
         Ok(account)
       } else {
         Err(ContractError::AccountNotFound)

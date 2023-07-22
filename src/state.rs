@@ -4,14 +4,15 @@ use crate::models::{Account, Claim, Drawing, Payout, RoundStatus, Style};
 use crate::msg::InstantiateMsg;
 use crate::{error::ContractError, models::MarketingInfo};
 use cosmwasm_std::{
-  Addr, Deps, DepsMut, Env, MessageInfo, Order, Storage, Timestamp, Uint128, Uint64,
+  Addr, BlockInfo, Deps, DepsMut, Env, MessageInfo, Order, Storage, Timestamp, Uint128, Uint64,
 };
 use cw_acl::client::Acl;
 use cw_lib::models::{Owner, Token};
 use cw_storage_plus::{Item, Map};
 use house_staking::client::House;
 
-pub const HOUSE_REVENUE_PCT: u128 = 50000; // == 5%
+pub const HOUSE_TICKET_TAX_PCT: u128 = 5_0000; // 5%
+pub const HOUSE_POT_TAX_PCT: u128 = 10_0000; // 10%
 
 pub const CONFIG_TOKEN: Item<Token> = Item::new("config_token");
 pub const CONFIG_PRICE: Item<Uint128> = Item::new("config_price");
@@ -21,7 +22,10 @@ pub const CONFIG_ROUND_SECONDS: Item<Uint64> = Item::new("config_round_seconds")
 pub const CONFIG_MARKETING: Item<MarketingInfo> = Item::new("config_marketing");
 pub const CONFIG_STYLE: Item<Style> = Item::new("config_style");
 pub const CONFIG_HOUSE_ADDR: Item<Addr> = Item::new("config_house_address");
+pub const CONFIG_ROLLING: Item<bool> = Item::new("config_rolling");
+pub const CONFIG_MIN_BALANCE: Item<Uint128> = Item::new("config_min_balance");
 pub const CONFIG_PAYOUTS: Map<u8, Payout> = Map::new("config_payouts");
+pub const CONFIG_DRAWER: Item<Addr> = Item::new("config_drawer");
 
 pub const OWNER: Item<Owner> = Item::new("owner");
 pub const ACCOUNTS: Map<Addr, Account> = Map::new("accounts");
@@ -36,7 +40,6 @@ pub const ROUND_TICKETS: Map<(Addr, String), Vec<u16>> = Map::new("round_tickets
 
 pub const CLAIMS: Map<Addr, Claim> = Map::new("claims");
 pub const DRAWINGS: Map<u64, Drawing> = Map::new("drawings");
-pub const WINNING_TICKETS: Map<(Addr, String), Vec<u16>> = Map::new("winning_tickets");
 
 pub fn initialize(
   deps: DepsMut,
@@ -44,17 +47,29 @@ pub fn initialize(
   info: &MessageInfo,
   msg: &InstantiateMsg,
 ) -> Result<(), ContractError> {
+  let owner = msg
+    .owner
+    .clone()
+    .unwrap_or_else(|| Owner::Address(info.sender.clone()));
+
+  deps.api.addr_validate(msg.config.drawer.as_str())?;
+  deps.api.addr_validate(msg.config.house_address.as_str())?;
+
+  if let Token::Cw20 { address } = msg.config.token.clone() {
+    deps.api.addr_validate(address.as_str())?;
+  }
+
+  if let Owner::Acl(address) = &owner {
+    deps.api.addr_validate(address.as_str())?;
+  } else if let Owner::Address(address) = &owner {
+    deps.api.addr_validate(address.as_str())?;
+  }
+
   ROUND_NO.save(deps.storage, &Uint64::one())?;
   ROUND_START.save(deps.storage, &env.block.time)?;
   ROUND_TICKET_COUNT.save(deps.storage, &0)?;
   ROUND_STATUS.save(deps.storage, &RoundStatus::Active)?;
-  OWNER.save(
-    deps.storage,
-    &msg
-      .owner
-      .clone()
-      .unwrap_or_else(|| Owner::Address(info.sender.clone())),
-  )?;
+  OWNER.save(deps.storage, &owner)?;
 
   for payout in msg.config.payouts.iter() {
     CONFIG_PAYOUTS.save(deps.storage, payout.n, payout)?;
@@ -67,7 +82,10 @@ pub fn initialize(
   CONFIG_ROUND_SECONDS.save(deps.storage, &msg.config.round_seconds)?;
   CONFIG_MARKETING.save(deps.storage, &msg.config.marketing)?;
   CONFIG_HOUSE_ADDR.save(deps.storage, &msg.config.house_address)?;
+  CONFIG_ROLLING.save(deps.storage, &msg.config.rolling)?;
+  CONFIG_MIN_BALANCE.save(deps.storage, &msg.config.min_balance)?;
   CONFIG_STYLE.save(deps.storage, &msg.config.style)?;
+  CONFIG_DRAWER.save(deps.storage, &msg.config.drawer)?;
 
   DEBUG_WINNING_NUMBERS.save(deps.storage, &msg.winning_numbers)?;
 
@@ -151,4 +169,40 @@ pub fn load_winning_numbers(
   } else {
     Err(ContractError::InvalidRoundNo)
   }
+}
+
+pub fn is_ready(
+  storage: &dyn Storage,
+  block: &BlockInfo,
+) -> Result<bool, ContractError> {
+  if RoundStatus::Active == ROUND_STATUS.load(storage)? {
+    let round_start = ROUND_START.load(storage)?;
+    let round_duration = CONFIG_ROUND_SECONDS.load(storage)?;
+    // Abort if the round hasn't reach its end time
+    if (round_start.seconds() + round_duration.u64()) > block.time.seconds() {
+      return Ok(false);
+    }
+  }
+  Ok(true)
+}
+
+pub fn load_latest_drawing(storage: &dyn Storage) -> Result<Option<Drawing>, ContractError> {
+  let mut round_no = ROUND_NO.load(storage).unwrap();
+  if round_no > Uint64::one() {
+    round_no -= Uint64::one();
+  }
+  Ok(DRAWINGS.may_load(storage, round_no.u64())?)
+}
+
+pub fn load_tickets_by_account(
+  storage: &dyn Storage,
+  address: &Addr,
+) -> Result<Vec<Vec<u16>>, ContractError> {
+  Ok(
+    ROUND_TICKETS
+      .prefix(address.clone())
+      .range(storage, None, None, Order::Ascending)
+      .map(|r| r.unwrap().1)
+      .collect(),
+  )
 }

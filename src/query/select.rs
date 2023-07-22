@@ -1,15 +1,15 @@
 use crate::error::ContractError;
 use crate::models::{Config, Round};
-use crate::msg::{AccountView, ClaimView};
+use crate::msg::AccountView;
 use crate::state::{
-  load_claim, load_drawing, load_payouts, ACCOUNTS, CONFIG_HOUSE_ADDR, CONFIG_MARKETING,
-  CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROUND_SECONDS,
-  CONFIG_STYLE, CONFIG_TOKEN, ROUND_NO, ROUND_START, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
-  WINNING_TICKETS,
+  load_payouts, ACCOUNTS, CLAIMS, CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MARKETING,
+  CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE, CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE,
+  CONFIG_ROLLING, CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, DRAWINGS, ROUND_NO,
+  ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
 };
 use crate::util::calc_total_claim_amount;
 use crate::{msg::SelectResponse, state::OWNER};
-use cosmwasm_std::{Addr, Deps, Env, Order, Storage};
+use cosmwasm_std::{Addr, Deps, Env, Order};
 use cw_lib::utils::funds::get_token_balance;
 use cw_repository::client::Repository;
 
@@ -25,6 +25,7 @@ pub fn select(
   let round_seconds = CONFIG_ROUND_SECONDS.load(deps.storage)?;
   let round_start = ROUND_START.load(deps.storage)?;
   let token = CONFIG_TOKEN.load(deps.storage)?;
+  let min_balance = CONFIG_MIN_BALANCE.load(deps.storage)?;
 
   Ok(SelectResponse {
     owner: loader.get("owner", &OWNER)?,
@@ -34,6 +35,7 @@ pub fn select(
         start: round_start.clone(),
         end: round_start.plus_seconds(round_seconds.into()),
         ticket_count: ROUND_TICKET_COUNT.load(deps.storage)?,
+        status: ROUND_STATUS.load(deps.storage)?,
         round_no,
       }))
     })?,
@@ -54,8 +56,11 @@ pub fn select(
         price: CONFIG_PRICE.load(deps.storage)?,
         style: CONFIG_STYLE.load(deps.storage)?,
         house_address: CONFIG_HOUSE_ADDR.load(deps.storage)?,
+        rolling: CONFIG_ROLLING.load(deps.storage)?,
+        drawer: CONFIG_DRAWER.load(deps.storage)?,
         token: token.clone(),
         round_seconds,
+        min_balance,
         payouts: CONFIG_PAYOUTS
           .range(deps.storage, None, None, Order::Ascending)
           .map(|r| r.unwrap().1)
@@ -74,41 +79,29 @@ pub fn select(
 
     account: loader.view("account", |maybe_addr| {
       if let Some(addr) = maybe_addr {
-        return Ok(Some(AccountView {
-          totals: ACCOUNTS.load(deps.storage, addr.clone())?.totals,
-          claim: load_claim_view(deps.storage, addr.clone()).unwrap_or(None),
-          tickets: ROUND_TICKETS
-            .prefix(addr.clone())
-            .range(deps.storage, None, None, Order::Ascending)
-            .map(|r| r.unwrap().1)
-            .collect(),
-        }));
+        let maybe_account = ACCOUNTS.may_load(deps.storage, addr.clone())?;
+        if let Some(account) = maybe_account {
+          let maybe_claim = match CLAIMS.may_load(deps.storage, addr.clone())? {
+            Some(mut claim) => {
+              let drawing = DRAWINGS.load(deps.storage, claim.round_no.into())?;
+              let payouts = load_payouts(deps.storage).unwrap();
+              claim.amount = Some(calc_total_claim_amount(&claim, &drawing, &payouts));
+              Some(claim)
+            },
+            None => None,
+          };
+          return Ok(Some(AccountView {
+            totals: account.totals,
+            claim: maybe_claim,
+            tickets: ROUND_TICKETS
+              .prefix(addr.clone())
+              .range(deps.storage, None, None, Order::Ascending)
+              .map(|r| r.unwrap().1)
+              .collect(),
+          }));
+        }
       }
       Ok(None)
     })?,
   })
-}
-
-fn load_claim_view(
-  storage: &dyn Storage,
-  address: Addr,
-) -> Result<Option<ClaimView>, ContractError> {
-  if let Ok(claim) = load_claim(storage, &address) {
-    if let Ok(drawing) = load_drawing(storage, claim.round_no) {
-      let payouts = load_payouts(storage)?;
-      let claim_amount = calc_total_claim_amount(&claim, &drawing, &payouts);
-      let winning_tickets: Vec<Vec<u16>> = WINNING_TICKETS
-        .prefix(address.clone())
-        .range(storage, None, None, Order::Ascending)
-        .map(|r| r.unwrap().1)
-        .collect();
-
-      return Ok(Some(ClaimView {
-        round_no: claim.round_no,
-        amount: claim_amount,
-        winning_tickets,
-      }));
-    }
-  }
-  Ok(None)
 }
