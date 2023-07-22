@@ -32,10 +32,10 @@ pub fn calc_total_claim_amount(
       let n_total_tickets = drawing.match_counts[match_count] as u32;
       if n_total_tickets > 0 {
         // Add incentive owed to user
-        claim_amount += payout.incentive;
+        claim_amount += payout.incentive * Uint128::from(*n_tickets);
         // Add portion of pot owed to user
         claim_amount += mul_pct(taxed_pot_size, payout.pct)
-          .multiply_ratio((*n_tickets) as u128, n_total_tickets as u128);
+          .multiply_ratio((*n_tickets) as u128, n_total_tickets as u128)
       }
     }
   }
