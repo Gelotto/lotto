@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::{
   error::ContractError,
-  models::Account,
+  models::{Account, Ticket},
   state::{
     load_house, ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN,
     HOUSE_TICKET_TAX_PCT, ROUND_TICKETS, ROUND_TICKET_COUNT,
@@ -105,11 +105,12 @@ pub fn process_ticket(
   // the ticket number hash is sorted, the vec stored in the map's values is
   // not. This can hypothetically let us check whether the ticket matches with
   // respect to order (permutations rather than combinations).
-  ROUND_TICKETS.update(storage, key, |x| -> Result<_, ContractError> {
-    if x.is_some() {
-      Err(ContractError::TicketExists)
+  ROUND_TICKETS.update(storage, key, |maybe_ticket| -> Result<_, ContractError> {
+    if let Some(mut ticket) = maybe_ticket {
+      ticket.n += 1;
+      Ok(ticket)
     } else {
-      Ok(numbers)
+      Ok(Ticket { numbers, n: 1 })
     }
   })?;
 

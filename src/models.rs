@@ -32,6 +32,12 @@ pub struct Config {
 }
 
 #[cw_serde]
+pub struct Ticket {
+  pub numbers: Vec<u16>,
+  pub n: u16,
+}
+
+#[cw_serde]
 pub struct Payout {
   pub n: u8,
   pub incentive: Uint128,
@@ -93,7 +99,7 @@ pub struct Win {
 pub struct Claim {
   pub round_no: Uint64,
   pub amount: Option<Uint128>,
-  pub tickets: Vec<Vec<u16>>,
+  pub tickets: Vec<Ticket>,
   pub matches: Vec<u16>,
 }
 

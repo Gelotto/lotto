@@ -2,7 +2,7 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Uint128, Uint64};
 use cw_lib::models::Owner;
 
-use crate::models::{AccountTotals, Claim, Config, Round};
+use crate::models::{AccountTotals, Claim, Config, Round, Ticket};
 
 #[cw_serde]
 pub struct InstantiateMsg {
@@ -36,7 +36,7 @@ pub struct MigrateMsg {}
 #[cw_serde]
 pub struct AccountView {
   pub totals: AccountTotals,
-  pub tickets: Vec<Vec<u16>>,
+  pub tickets: Vec<Ticket>,
   pub claim: Option<Claim>,
 }
 

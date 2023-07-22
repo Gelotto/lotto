@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::models::{Account, Claim, Drawing, Payout, RoundStatus, Style};
+use crate::models::{Account, Claim, Drawing, Payout, RoundStatus, Style, Ticket};
 use crate::msg::InstantiateMsg;
 use crate::{error::ContractError, models::MarketingInfo};
 use cosmwasm_std::{
@@ -36,7 +36,7 @@ pub const ROUND_STATUS: Item<RoundStatus> = Item::new("game_state");
 pub const ROUND_NO: Item<Uint64> = Item::new("round_counter");
 pub const ROUND_START: Item<Timestamp> = Item::new("round_start");
 pub const ROUND_TICKET_COUNT: Item<u32> = Item::new("round_ticket_count");
-pub const ROUND_TICKETS: Map<(Addr, String), Vec<u16>> = Map::new("round_tickets");
+pub const ROUND_TICKETS: Map<(Addr, String), Ticket> = Map::new("round_tickets");
 
 pub const CLAIMS: Map<Addr, Claim> = Map::new("claims");
 pub const DRAWINGS: Map<u64, Drawing> = Map::new("drawings");
@@ -197,7 +197,7 @@ pub fn load_latest_drawing(storage: &dyn Storage) -> Result<Option<Drawing>, Con
 pub fn load_tickets_by_account(
   storage: &dyn Storage,
   address: &Addr,
-) -> Result<Vec<Vec<u16>>, ContractError> {
+) -> Result<Vec<Ticket>, ContractError> {
   Ok(
     ROUND_TICKETS
       .prefix(address.clone())

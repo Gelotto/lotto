@@ -170,7 +170,7 @@ pub fn process_next_page(
   };
 
   // Total number of tickets processed in this call:
-  let mut processed_ticket_count = 0;
+  let mut processed_ticket_count: u32 = 0;
 
   // In-memory cache of Claim records encountered once or more within the scope
   // of processing this batch of tickets.
@@ -193,12 +193,12 @@ pub fn process_next_page(
     .range(storage, min, None, Order::Ascending)
     .take(TICKET_PAGE_SIZE)
   {
-    let ((addr, hash), numbers) = result?;
+    let ((addr, hash), ticket) = result?;
 
     // `n_matches` is the number of matching numbers contained in the ticket.
     let mut n_matching_numbers: u8 = 0;
     // Count num matching numbers in the ticket, incrementing `n_matches`
-    for x in &numbers {
+    for x in &ticket.numbers {
       if winning_numbers.contains(x) {
         n_matching_numbers += 1;
       }
@@ -208,8 +208,8 @@ pub fn process_next_page(
 
     // Update running batch-level totals & state:
     cursor = Some((addr.clone(), hash.clone()));
-    match_counts[n_matching_numbers as usize] += 1;
-    processed_ticket_count += 1;
+    match_counts[n_matching_numbers as usize] += ticket.n;
+    processed_ticket_count += ticket.n as u32;
 
     // Increment claim amount by base payout incentive.
     // Save a record of the owner's winning ticket numbers.
@@ -228,7 +228,7 @@ pub fn process_next_page(
         };
         claims.get_mut(&addr).unwrap()
       };
-      claim.matches[n_matching_numbers as usize] += 1;
+      claim.matches[n_matching_numbers as usize] += ticket.n;
     }
   }
 
