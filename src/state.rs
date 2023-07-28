@@ -73,6 +73,7 @@ pub fn initialize(
   ROUND_STATUS.save(deps.storage, &RoundStatus::Active)?;
   OWNER.save(deps.storage, &owner)?;
   BALANCE_CLAIMABLE.save(deps.storage, &Uint128::zero())?;
+  STAGED_CONFIG.save(deps.storage, &None)?;
 
   for payout in msg.config.payouts.iter() {
     CONFIG_PAYOUTS.save(deps.storage, payout.n, payout)?;

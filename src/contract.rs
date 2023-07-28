@@ -2,7 +2,7 @@ use crate::error::ContractError;
 use crate::execute;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::query;
-use crate::state;
+use crate::state::{self, STAGED_CONFIG};
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response};
 use cw2::set_contract_version;
@@ -54,9 +54,18 @@ pub fn query(
 
 #[entry_point]
 pub fn migrate(
-  _deps: DepsMut,
+  deps: DepsMut,
   _env: Env,
-  _msg: MigrateMsg,
+  msg: MigrateMsg,
 ) -> Result<Response, ContractError> {
+  set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+  match msg {
+    MigrateMsg::V0_0_4 {} => {
+      if STAGED_CONFIG.load(deps.storage).is_err() {
+        STAGED_CONFIG.save(deps.storage, &None)?;
+      }
+    },
+    MigrateMsg::NoOp {} => {},
+  }
   Ok(Response::default())
 }

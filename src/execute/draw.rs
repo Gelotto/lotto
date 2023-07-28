@@ -8,9 +8,10 @@ use crate::{
   models::{Claim, Drawing, Payout, RoundStatus},
   state::{
     load_drawing, load_payouts, load_tickets_by_account, load_winning_numbers, BALANCE_CLAIMABLE,
-    CLAIMS, CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE,
-    CONFIG_NUMBER_COUNT, CONFIG_ROLLING, CONFIG_ROUND_SECONDS, CONFIG_TOKEN, DEBUG_WINNING_NUMBERS,
-    DRAWINGS, ROUND_NO, ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
+    CLAIMS, CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MARKETING, CONFIG_MAX_NUMBER,
+    CONFIG_MIN_BALANCE, CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROLLING,
+    CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, DEBUG_WINNING_NUMBERS, DRAWINGS, ROUND_NO,
+    ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, STAGED_CONFIG, TAXES,
   },
   util::mul_pct,
 };
@@ -26,7 +27,7 @@ use cw_lib::{
 use cw_storage_plus::Bound;
 use house_staking::{client::House, models::AccountTokenAmount};
 
-pub const TICKET_PAGE_SIZE: usize = 500;
+pub const TICKET_PAGE_SIZE: usize = 1000;
 
 pub fn draw(
   deps: DepsMut,
@@ -313,6 +314,31 @@ pub fn reset_round_state(
       Ok(n + Uint64::one())
     })?;
   }
+
+  // If there is a new config staged, then we update the config vars here at the
+  // end of the latest (this) draw. Note that we never update the TOKEN config
+  // var, since this must remain constant for the claim and withdraw to continue
+  // working.
+  if let Some(new_config) = STAGED_CONFIG.load(storage)? {
+    CONFIG_HOUSE_ADDR.save(storage, &new_config.house_address)?;
+    CONFIG_MAX_NUMBER.save(storage, &new_config.max_number)?;
+    CONFIG_MIN_BALANCE.save(storage, &new_config.min_balance)?;
+    CONFIG_NUMBER_COUNT.save(storage, &new_config.number_count)?;
+    CONFIG_ROLLING.save(storage, &new_config.rolling)?;
+    CONFIG_ROUND_SECONDS.save(storage, &new_config.round_seconds)?;
+    CONFIG_MARKETING.save(storage, &new_config.marketing)?;
+    CONFIG_PRICE.save(storage, &new_config.price)?;
+    CONFIG_STYLE.save(storage, &new_config.style)?;
+
+    CONFIG_PAYOUTS.clear(storage);
+    for payout in new_config.payouts {
+      CONFIG_PAYOUTS.save(storage, payout.n, &payout)?;
+    }
+
+    // clear staged Config changes from state
+    STAGED_CONFIG.save(storage, &None)?;
+  }
+
   Ok(())
 }
 
@@ -401,13 +427,13 @@ pub fn end_draw(
     total_incoming += drawing.round_balance;
   }
 
-  reset_round_state(storage, env, ticket_count)?;
-
   api.debug(format!(">>> {:?}", drawing).as_str());
   api.debug(format!(">>> house incoming : {:?}", total_incoming).as_str());
   api.debug(format!(">>> house outgoing: {:?}", total_outgoing).as_str());
 
   let house = House::new(&CONFIG_HOUSE_ADDR.load(storage)?);
+
+  reset_round_state(storage, env, ticket_count)?;
 
   return Ok(Some(house.process(
     env.contract.address.clone(),
@@ -426,7 +452,6 @@ pub fn end_draw(
   )?));
 }
 
-///
 fn ensure_round_can_end(
   storage: &dyn Storage,
   block: &BlockInfo,

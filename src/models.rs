@@ -4,7 +4,7 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Api, Timestamp, Uint128, Uint64};
 use cw_lib::models::Token;
 
-use crate::{error::ContractError, util::calc_total_claim_amount};
+use crate::{error::ContractError, state::CONFIG_PAYOUTS, util::calc_total_claim_amount};
 
 #[cw_serde]
 pub enum RoundStatus {

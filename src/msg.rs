@@ -33,7 +33,10 @@ pub enum QueryMsg {
 }
 
 #[cw_serde]
-pub struct MigrateMsg {}
+pub enum MigrateMsg {
+  V0_0_4 {},
+  NoOp {},
+}
 
 #[cw_serde]
 pub struct AccountView {
