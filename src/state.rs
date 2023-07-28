@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::models::{Account, Claim, Drawing, Payout, RoundStatus, Style, Ticket};
+use crate::models::{Account, Claim, Config, Drawing, Payout, RoundStatus, Style, Ticket};
 use crate::msg::InstantiateMsg;
 use crate::{error::ContractError, models::MarketingInfo};
 use cosmwasm_std::{
@@ -39,7 +39,9 @@ pub const ROUND_TICKET_COUNT: Item<u32> = Item::new("round_ticket_count");
 pub const ROUND_TICKETS: Map<(Addr, String), Ticket> = Map::new("round_tickets");
 
 pub const CLAIMS: Map<Addr, Claim> = Map::new("claims");
+pub const BALANCE_CLAIMABLE: Item<Uint128> = Item::new("total_claim_amount");
 pub const DRAWINGS: Map<u64, Drawing> = Map::new("drawings");
+pub const STAGED_CONFIG: Item<Option<Config>> = Item::new("staged_config");
 
 pub fn initialize(
   deps: DepsMut,
@@ -70,6 +72,7 @@ pub fn initialize(
   ROUND_TICKET_COUNT.save(deps.storage, &0)?;
   ROUND_STATUS.save(deps.storage, &RoundStatus::Active)?;
   OWNER.save(deps.storage, &owner)?;
+  BALANCE_CLAIMABLE.save(deps.storage, &Uint128::zero())?;
 
   for payout in msg.config.payouts.iter() {
     CONFIG_PAYOUTS.save(deps.storage, payout.n, payout)?;
@@ -175,7 +178,8 @@ pub fn is_ready(
   storage: &dyn Storage,
   block: &BlockInfo,
 ) -> Result<bool, ContractError> {
-  if RoundStatus::Active == ROUND_STATUS.load(storage)? {
+  let status = ROUND_STATUS.load(storage)?;
+  if RoundStatus::Active == status {
     let round_start = ROUND_START.load(storage)?;
     let round_duration = CONFIG_ROUND_SECONDS.load(storage)?;
     // Abort if the round hasn't reach its end time

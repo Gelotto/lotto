@@ -1,13 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Timestamp, Uint128, Uint64};
+use cosmwasm_std::{Addr, Api, Timestamp, Uint128, Uint64};
 use cw_lib::models::Token;
 
-use crate::{
-  state::HOUSE_POT_TAX_PCT,
-  util::{calc_total_claim_amount, mul_pct},
-};
+use crate::{error::ContractError, util::calc_total_claim_amount};
 
 #[cw_serde]
 pub enum RoundStatus {
@@ -51,6 +48,7 @@ pub struct Round {
   pub start: Timestamp,
   pub end: Timestamp,
   pub status: RoundStatus,
+  pub balance: Uint128,
 }
 
 #[cw_serde]
@@ -77,7 +75,7 @@ pub enum StyleValue {
 pub struct Drawing {
   pub round_no: Option<Uint64>,
   pub ticket_count: u32,
-  pub balance: Uint128,
+  pub round_balance: Uint128,
   pub start_balance: Uint128,
   pub pot_payout: Uint128,
   pub incentive_payout: Uint128,
@@ -115,6 +113,49 @@ pub struct Account {
   pub totals: AccountTotals,
 }
 
+impl Config {
+  pub fn validate(
+    &self,
+    api: &dyn Api,
+  ) -> Result<(), ContractError> {
+    api
+      .addr_validate(self.drawer.as_str())
+      .map_err(|_| ContractError::ValidationError)?;
+
+    api
+      .addr_validate(self.house_address.as_str())
+      .map_err(|_| ContractError::ValidationError)?;
+
+    if let Token::Cw20 { address } = &self.token {
+      api
+        .addr_validate(address.as_str())
+        .map_err(|_| ContractError::ValidationError)?;
+    }
+
+    if self.price.is_zero()
+      || self.max_number == 0
+      || self.number_count == 0
+      || self.round_seconds < Uint64::from(60u64)
+    {
+      return Err(ContractError::ValidationError);
+    }
+
+    let mut visited: HashSet<u8> = HashSet::with_capacity(self.number_count as usize);
+    for payout in self.payouts.iter() {
+      if payout.pct > Uint128::from(1_000_000u128)
+        || payout.n == 0
+        || payout.n > self.number_count
+        || visited.contains(&payout.n)
+      {
+        return Err(ContractError::ValidationError);
+      }
+      visited.insert(payout.n);
+    }
+
+    Ok(())
+  }
+}
+
 impl Account {
   pub fn new() -> Self {
     Self {
@@ -136,12 +177,8 @@ impl Drawing {
     self.pot_payout + self.incentive_payout
   }
 
-  pub fn get_total_payout_after_tax(&self) -> Uint128 {
-    (self.pot_payout - mul_pct(self.pot_payout, HOUSE_POT_TAX_PCT.into())) + self.incentive_payout
-  }
-
   pub fn get_pot_size(&self) -> Uint128 {
-    self.start_balance + self.balance
+    self.start_balance + self.round_balance
   }
 }
 

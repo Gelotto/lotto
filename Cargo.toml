@@ -1,6 +1,6 @@
 [package]
 name = "cw-contract"
-version = "0.0.1"
+version = "0.0.3"
 authors = []
 edition = "2021"
 description = "Smart Contract"

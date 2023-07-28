@@ -13,9 +13,11 @@ pub struct InstantiateMsg {
 
 #[cw_serde]
 pub enum ExecuteMsg {
+  SetConfig { config: Config },
   Buy { tickets: Vec<Vec<u16>> },
   Draw {},
   Claim {},
+  Withdraw {},
 }
 
 #[cw_serde]
@@ -46,6 +48,7 @@ pub struct SelectResponse {
   pub config: Option<Config>,
   pub round: Option<Round>,
   pub tax_rate: Option<Uint128>,
+  pub balance_claimable: Option<Uint128>,
   pub balance: Option<Uint128>,
   pub account: Option<AccountView>,
 }

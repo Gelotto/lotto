@@ -55,7 +55,15 @@ transfer-ownership() {
 
 
 query-select() {
-  query='{"select":{"fields":null}}'
+  query='{"select":{"fields":["balance","balance_claimable"]}}'
+  flags="--chain-id $CHAIN_ID --output json --node $NODE"
+  echo junod query wasm contract-state smart $CONTRACT_ADDR "$query" $flags
+  response=$(junod query wasm contract-state smart $CONTRACT_ADDR "$query" $flags)
+  echo $response | ./bin/utils/base64-decode-attributes | jq
+}
+
+query-drawing() {
+  query='{"drawing":{}}'
   flags="--chain-id $CHAIN_ID --output json --node $NODE"
   echo junod query wasm contract-state smart $CONTRACT_ADDR "$query" $flags
   response=$(junod query wasm contract-state smart $CONTRACT_ADDR "$query" $flags)
@@ -68,6 +76,9 @@ echo "executing $CMD for $CONTRACT_ADDR"
 case $CMD in
   transfer-ownership)
     transfer-ownership $1
+    ;;
+  query-drawing) 
+    query-drawing
     ;;
   query-select) 
     query-select

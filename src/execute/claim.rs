@@ -1,8 +1,8 @@
 use crate::{
   error::ContractError,
   state::{
-    load_claim, load_drawing, load_payouts, require_active_game_state, ACCOUNTS, CLAIMS,
-    CONFIG_TOKEN,
+    load_claim, load_drawing, load_payouts, require_active_game_state, ACCOUNTS, BALANCE_CLAIMABLE,
+    CLAIMS, CONFIG_TOKEN,
   },
   util::calc_total_claim_amount,
 };
@@ -23,6 +23,10 @@ pub fn claim(
   let claim_amount = calc_total_claim_amount(&claim, &drawing, &payouts);
 
   CLAIMS.remove(deps.storage, info.sender.clone());
+
+  BALANCE_CLAIMABLE.update(deps.storage, |total| -> Result<_, ContractError> {
+    Ok(total - claim_amount)
+  })?;
 
   ACCOUNTS.update(
     deps.storage,

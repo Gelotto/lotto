@@ -7,10 +7,10 @@ use crate::{
   error::ContractError,
   models::{Claim, Drawing, Payout, RoundStatus},
   state::{
-    load_drawing, load_payouts, load_tickets_by_account, load_winning_numbers, CLAIMS,
-    CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE, CONFIG_NUMBER_COUNT,
-    CONFIG_ROLLING, CONFIG_ROUND_SECONDS, CONFIG_TOKEN, DEBUG_WINNING_NUMBERS, DRAWINGS, ROUND_NO,
-    ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
+    load_drawing, load_payouts, load_tickets_by_account, load_winning_numbers, BALANCE_CLAIMABLE,
+    CLAIMS, CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE,
+    CONFIG_NUMBER_COUNT, CONFIG_ROLLING, CONFIG_ROUND_SECONDS, CONFIG_TOKEN, DEBUG_WINNING_NUMBERS,
+    DRAWINGS, ROUND_NO, ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
   },
   util::mul_pct,
 };
@@ -71,25 +71,35 @@ pub fn start_processing_tickets(
 
   // Get the current balance. After subtracting any taxes, we save this amount
   // as the total pot size to be divided up among winning tickets.
-  let balance = get_token_balance(deps.querier, &env.contract.address, &token)?;
+  let contract_balance = get_token_balance(deps.querier, &env.contract.address, &token)?;
 
   deps
     .api
-    .debug(format!(">>> balance: {}", balance.u128()).as_str());
+    .debug(format!(">>> balance: {}", contract_balance.u128()).as_str());
+
+  let taxable_balance = contract_balance - BALANCE_CLAIMABLE.load(deps.storage)?;
+
+  deps
+    .api
+    .debug(format!(">>> taxable balance: {}", taxable_balance.u128()).as_str());
 
   // Compute total tax amount owed and append send messages to response for
   // sending tokens to each tax recipient.
-  let post_tax_balance = if !balance.is_zero() {
-    let (submsgs, tax_amount) = build_tax_send_submsgs(deps.storage, &token, balance)?;
+  let post_tax_balance = if !taxable_balance.is_zero() {
+    let (submsgs, tax_amount) = build_tax_send_submsgs(deps.storage, &token, contract_balance)?;
     resp = resp.add_submessages(submsgs);
-    balance - tax_amount
+    taxable_balance - tax_amount
   } else {
-    balance
+    taxable_balance
   };
 
-  deps
-    .api
-    .debug(format!(">>> post tax balance: {}", post_tax_balance.u128()).as_str());
+  deps.api.debug(
+    format!(
+      ">>> after deducting claims outstanding: {}",
+      post_tax_balance.u128()
+    )
+    .as_str(),
+  );
 
   // Select and save the winning numbers
   let winning_numbers = choose_winning_numbers(deps.storage, &env)?;
@@ -103,7 +113,7 @@ pub fn start_processing_tickets(
   // transactions as it takes to complete the drawing process.
   let mut drawing = Drawing {
     ticket_count,
-    balance: post_tax_balance,
+    round_balance: post_tax_balance,
     start_balance: CONFIG_MIN_BALANCE.load(deps.storage)?,
     winning_numbers: winning_numbers.iter().map(|x| *x).collect(),
     match_counts: vec![0; winning_numbers.len() + 1],
@@ -197,6 +207,7 @@ pub fn process_next_page(
 
     // `n_matches` is the number of matching numbers contained in the ticket.
     let mut n_matching_numbers: u8 = 0;
+
     // Count num matching numbers in the ticket, incrementing `n_matches`
     for x in &ticket.numbers {
       if winning_numbers.contains(x) {
@@ -211,11 +222,8 @@ pub fn process_next_page(
     match_counts[n_matching_numbers as usize] += ticket.n;
     processed_ticket_count += ticket.n as u32;
 
-    // Increment claim amount by base payout incentive.
-    // Save a record of the owner's winning ticket numbers.
+    // Upsert the account's claim record with updated match counts
     if let Some(_) = payouts.get(&n_matching_numbers) {
-      // Upsert a Claim record for this ticket's owner,
-      // incrementing its match counts
       let claim: &mut Claim = {
         if claims.get(&addr).is_none() {
           let new_claim = Claim {
@@ -228,6 +236,7 @@ pub fn process_next_page(
         };
         claims.get_mut(&addr).unwrap()
       };
+
       claim.matches[n_matching_numbers as usize] += ticket.n;
     }
   }
@@ -318,18 +327,18 @@ pub fn end_draw(
 ) -> Result<Option<Vec<WasmMsg>>, ContractError> {
   let ticket_count = ROUND_TICKET_COUNT.load(storage)?;
 
-  reset_round_state(storage, env, ticket_count)?;
-
   // If maybe_drawing is None, it means that there are no tickets, so we skip
   // the follow.
   //
   // Otherwise, we compute the total incentive needed for processing claims and
   // transfer it to this contract's balance from the house.
   // Compute total incentive amount required for pending claims
-  let (incentive_payout, pot_payout) = {
+  let (incentive_payout_amount, pot_payout_amount) = {
     let mut incentive_amount = Uint128::zero();
-    let mut pot_amount = Uint128::zero();
+    let mut pot_payout_amount = Uint128::zero();
+
     let pot_size = drawing.get_pot_size();
+
     for (n_matches, payout) in payouts.iter() {
       let n_tickets = drawing.match_counts[(*n_matches) as usize];
       if n_tickets > 0 {
@@ -338,17 +347,21 @@ pub fn end_draw(
           incentive_amount += payout.incentive * Uint128::from(n_tickets);
         }
         if !payout.pct.is_zero() {
-          pot_amount += mul_pct(pot_size, payout.pct);
+          pot_payout_amount += mul_pct(pot_size, payout.pct);
         }
       }
     }
-    (incentive_amount, pot_amount)
+    (incentive_amount, pot_payout_amount)
   };
 
-  drawing.pot_payout = pot_payout;
-  drawing.incentive_payout = incentive_payout;
-  drawing.total_payout = incentive_payout + pot_payout;
+  drawing.pot_payout = pot_payout_amount;
+  drawing.incentive_payout = incentive_payout_amount;
+  drawing.total_payout = incentive_payout_amount + pot_payout_amount; // TODO: Deprecate this variable
   drawing.cursor = None;
+
+  BALANCE_CLAIMABLE.update(storage, |total| -> Result<_, ContractError> {
+    Ok(total + drawing.total_payout)
+  })?;
 
   // Get CW20 address for house process msg
   let token = CONFIG_TOKEN.load(storage)?;
@@ -360,23 +373,23 @@ pub fn end_draw(
 
   // Build message to take incentives from house
   let is_rolling = CONFIG_ROLLING.load(storage)?;
-  let total_payout_after_tax = drawing.get_total_payout_after_tax();
-  let has_surplus_balance = drawing.balance > total_payout_after_tax;
-  let total_outgoing = total_payout_after_tax;
+  let total_payout = drawing.get_total_payout();
+  let has_surplus_balance = drawing.round_balance > total_payout;
+  let total_outgoing = total_payout;
   let mut total_incoming = Uint128::zero();
 
   if !is_rolling {
     // if the lottery doesn't roll its balance into the next round, then the
     // house takes all surplus balance on top of what it's already taking as
     // tax.
-    total_incoming = drawing.balance;
+    total_incoming = drawing.round_balance;
   } else if has_surplus_balance {
     // if we're at a surplus after payout, just send the house it's taxes and
     // keep the rest to "roll over" into next round
     api.debug(
       format!(
         ">>> surplus balance: {:?}",
-        drawing.balance - total_payout_after_tax
+        drawing.round_balance - total_payout
       )
       .as_str(),
     );
@@ -385,8 +398,10 @@ pub fn end_draw(
     // we're rolling over but don't have any surplus balance, which means we
     // need the house to pay out as much or more than we are sending into it,
     // so in this case, we just send in everything we've got.
-    total_incoming += drawing.balance;
+    total_incoming += drawing.round_balance;
   }
+
+  reset_round_state(storage, env, ticket_count)?;
 
   api.debug(format!(">>> {:?}", drawing).as_str());
   api.debug(format!(">>> house incoming : {:?}", total_incoming).as_str());

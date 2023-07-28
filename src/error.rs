@@ -44,4 +44,7 @@ pub enum ContractError {
 
   #[error("InvalidGameState")]
   InvalidGameState,
+
+  #[error("ValidationError")]
+  ValidationError,
 }

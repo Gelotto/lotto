@@ -33,6 +33,8 @@ pub fn execute(
     ExecuteMsg::Buy { tickets } => execute::buy(deps, env, info, tickets),
     ExecuteMsg::Draw {} => execute::draw(deps, env, info),
     ExecuteMsg::Claim {} => execute::claim(deps, env, info),
+    ExecuteMsg::Withdraw {} => execute::withdraw(deps, env, info),
+    ExecuteMsg::SetConfig { config } => execute::set_config(deps, env, info, config),
   }
 }
 

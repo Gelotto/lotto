@@ -32,3 +32,6 @@ transfer-ownership:
 
 select:
 	./client.sh query-select $(network) $(tag)
+
+drawing:
+	./client.sh query-drawing $(network) $(tag)
