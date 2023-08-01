@@ -15,6 +15,7 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
   SetConfig { config: Config },
   Buy { tickets: Vec<Vec<u16>> },
+  BuySeed { count: u16, seed: u32 },
   Draw {},
   Claim {},
   Withdraw {},
@@ -26,6 +27,7 @@ pub enum QueryMsg {
   Drawing {
     round_no: Option<Uint64>,
   },
+  // Claim {},
   Select {
     fields: Option<Vec<String>>,
     wallet: Option<Addr>,

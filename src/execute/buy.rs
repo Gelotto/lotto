@@ -8,6 +8,7 @@ use crate::{
     HOUSE_TICKET_TAX_PCT, ROUND_TICKETS, ROUND_TICKET_COUNT,
   },
   util::{hash_numbers, mul_pct},
+  xorshift32::Xorshift32,
 };
 use cosmwasm_std::{
   attr, Addr, Coin, DepsMut, Empty, Env, MessageInfo, QuerierWrapper, Response, Storage, Uint128,
@@ -18,6 +19,44 @@ use cw_lib::{
   utils::funds::{build_cw20_transfer_from_msg, get_cw20_balance, has_funds},
 };
 use house_staking::models::AccountTokenAmount;
+
+pub fn buy_seed(
+  deps: DepsMut,
+  env: Env,
+  info: MessageInfo,
+  ticket_count: u16,
+  seed: u32,
+) -> Result<Response, ContractError> {
+  let tickets = generate_random_tickets(deps.storage, ticket_count, seed)?;
+  buy(deps, env, info, tickets)
+}
+
+fn generate_random_tickets(
+  storage: &dyn Storage,
+  ticket_count: u16,
+  seed: u32,
+) -> Result<Vec<Vec<u16>>, ContractError> {
+  let number_count = CONFIG_NUMBER_COUNT.load(storage)?;
+  let max_val = CONFIG_MAX_NUMBER.load(storage)?;
+  let mut tickets: Vec<Vec<u16>> = Vec::with_capacity(ticket_count as usize);
+  let mut visited: HashSet<u16> = HashSet::with_capacity(number_count as usize - 1);
+  let mut rng = Xorshift32::new(seed);
+  for _ in 0..ticket_count {
+    let mut numbers: Vec<u16> = Vec::with_capacity(number_count as usize);
+    while numbers.len() < number_count as usize {
+      let x = rng
+        .random_int_in_range(0, max_val.into())
+        .clamp(0, u16::MAX as u32) as u16;
+      if !visited.contains(&x) {
+        numbers.push(x);
+        visited.insert(x);
+      }
+    }
+    tickets.push(numbers);
+    visited.clear();
+  }
+  Ok(tickets)
+}
 
 pub fn buy(
   deps: DepsMut,

@@ -31,6 +31,7 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
   match msg {
     ExecuteMsg::Buy { tickets } => execute::buy(deps, env, info, tickets),
+    ExecuteMsg::BuySeed { count, seed } => execute::buy_seed(deps, env, info, count, seed),
     ExecuteMsg::Draw {} => execute::draw(deps, env, info),
     ExecuteMsg::Claim {} => execute::claim(deps, env, info),
     ExecuteMsg::Withdraw {} => execute::withdraw(deps, env, info),
@@ -48,6 +49,7 @@ pub fn query(
     QueryMsg::Select { fields, wallet } => to_binary(&query::select(deps, env, fields, wallet)?),
     QueryMsg::Drawing { round_no } => to_binary(&query::drawing(deps, round_no)?),
     QueryMsg::Ready => to_binary(&query::ready(deps, env)?),
+    // QueryMsg::Claim {} => to_binary(&query::claims(deps, maybe_cursor, maybe_limit))
   }?;
   Ok(result)
 }

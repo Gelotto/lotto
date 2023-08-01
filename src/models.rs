@@ -4,7 +4,11 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Api, Timestamp, Uint128, Uint64};
 use cw_lib::models::Token;
 
-use crate::{error::ContractError, state::CONFIG_PAYOUTS, util::calc_total_claim_amount};
+use crate::{
+  error::ContractError,
+  state::HOUSE_POT_TAX_PCT,
+  util::{calc_total_claim_amount, mul_pct},
+};
 
 #[cw_serde]
 pub enum RoundStatus {
@@ -75,7 +79,7 @@ pub enum StyleValue {
 pub struct Drawing {
   pub round_no: Option<Uint64>,
   pub ticket_count: u32,
-  pub round_balance: Uint128,
+  pub round_balance: Uint128, // TODO: rename to end_balance
   pub start_balance: Uint128,
   pub pot_payout: Uint128,
   pub incentive_payout: Uint128,
@@ -173,12 +177,20 @@ impl Drawing {
     self.ticket_count == self.processed_ticket_count
   }
 
-  pub fn get_total_payout(&self) -> Uint128 {
+  pub fn resolve_total_payout(&self) -> Uint128 {
     self.pot_payout + self.incentive_payout
   }
 
-  pub fn get_pot_size(&self) -> Uint128 {
+  pub fn resolve_pot_size(&self) -> Uint128 {
     self.start_balance + self.round_balance
+  }
+
+  pub fn resolve_taxed_pot_size(&self) -> Uint128 {
+    self.start_balance
+      + mul_pct(
+        self.round_balance,
+        Uint128::from(1_000_000u128) - Uint128::from(HOUSE_POT_TAX_PCT),
+      )
   }
 }
 

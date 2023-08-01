@@ -22,7 +22,7 @@ pub fn calc_total_claim_amount(
   payouts: &HashMap<u8, Payout>,
 ) -> Uint128 {
   let mut claim_amount = Uint128::zero();
-  let pot_size = drawing.get_pot_size();
+  let total_pot = drawing.resolve_taxed_pot_size();
   for (match_count, n_tickets) in claim.matches.iter().enumerate().skip(1) {
     if let Some(payout) = payouts.get(&(match_count as u8)) {
       let n_total_tickets = drawing.match_counts[match_count] as u32;
@@ -30,7 +30,7 @@ pub fn calc_total_claim_amount(
         // Add incentive owed to user
         claim_amount += payout.incentive * Uint128::from(*n_tickets);
         // Add portion of pot owed to user
-        claim_amount += mul_pct(pot_size, payout.pct)
+        claim_amount += mul_pct(total_pot, payout.pct)
           .multiply_ratio((*n_tickets) as u128, n_total_tickets as u128)
       }
     }

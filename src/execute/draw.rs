@@ -10,19 +10,20 @@ use crate::{
     load_drawing, load_payouts, load_tickets_by_account, load_winning_numbers, BALANCE_CLAIMABLE,
     CLAIMS, CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MARKETING, CONFIG_MAX_NUMBER,
     CONFIG_MIN_BALANCE, CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROLLING,
-    CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, DEBUG_WINNING_NUMBERS, DRAWINGS, ROUND_NO,
-    ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, STAGED_CONFIG, TAXES,
+    CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, DEBUG_WINNING_NUMBERS, DRAWINGS,
+    HOUSE_POT_TAX_PCT, ROUND_NO, ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT,
+    STAGED_CONFIG,
   },
   util::mul_pct,
 };
 use cosmwasm_std::{
-  attr, Addr, Api, BlockInfo, Coin, DepsMut, Env, MessageInfo, Order, Response, Storage, SubMsg,
-  Uint128, Uint64, WasmMsg,
+  attr, Addr, Api, BlockInfo, Coin, DepsMut, Env, MessageInfo, Order, Response, Storage, Uint128,
+  Uint64, WasmMsg,
 };
 use cw_lib::{
   models::Token,
   random::{Pcg64, RngComponent},
-  utils::funds::{build_send_submsg, get_token_balance},
+  utils::funds::get_token_balance,
 };
 use cw_storage_plus::Bound;
 use house_staking::{client::House, models::AccountTokenAmount};
@@ -84,24 +85,6 @@ pub fn start_processing_tickets(
     .api
     .debug(format!(">>> taxable balance: {}", taxable_balance.u128()).as_str());
 
-  // Compute total tax amount owed and append send messages to response for
-  // sending tokens to each tax recipient.
-  let post_tax_balance = if !taxable_balance.is_zero() {
-    let (submsgs, tax_amount) = build_tax_send_submsgs(deps.storage, &token, contract_balance)?;
-    resp = resp.add_submessages(submsgs);
-    taxable_balance - tax_amount
-  } else {
-    taxable_balance
-  };
-
-  deps.api.debug(
-    format!(
-      ">>> after deducting claims outstanding: {}",
-      post_tax_balance.u128()
-    )
-    .as_str(),
-  );
-
   // Select and save the winning numbers
   let winning_numbers = choose_winning_numbers(deps.storage, &env)?;
 
@@ -114,7 +97,7 @@ pub fn start_processing_tickets(
   // transactions as it takes to complete the drawing process.
   let mut drawing = Drawing {
     ticket_count,
-    round_balance: post_tax_balance,
+    round_balance: taxable_balance,
     start_balance: CONFIG_MIN_BALANCE.load(deps.storage)?,
     winning_numbers: winning_numbers.iter().map(|x| *x).collect(),
     match_counts: vec![0; winning_numbers.len() + 1],
@@ -359,11 +342,11 @@ pub fn end_draw(
   // Otherwise, we compute the total incentive needed for processing claims and
   // transfer it to this contract's balance from the house.
   // Compute total incentive amount required for pending claims
-  let (incentive_payout_amount, pot_payout_amount) = {
+  let (incentive_payout_amount, taxable_pot_payout_amount) = {
     let mut incentive_amount = Uint128::zero();
     let mut pot_payout_amount = Uint128::zero();
 
-    let pot_size = drawing.get_pot_size();
+    let pot_size = drawing.resolve_pot_size(); // pre-tax amount
 
     for (n_matches, payout) in payouts.iter() {
       let n_tickets = drawing.match_counts[(*n_matches) as usize];
@@ -380,9 +363,27 @@ pub fn end_draw(
     (incentive_amount, pot_payout_amount)
   };
 
-  drawing.pot_payout = pot_payout_amount;
+  // Compute total tax amount owed and append send messages to response for
+  // sending tokens to each tax recipient.
+  let tax_amount = if !taxable_pot_payout_amount.is_zero() {
+    mul_pct(taxable_pot_payout_amount, HOUSE_POT_TAX_PCT.into())
+  } else {
+    Uint128::zero()
+  };
+
+  api.debug(
+    format!(
+      ">>> pot payout amount: {}",
+      taxable_pot_payout_amount.u128()
+    )
+    .as_str(),
+  );
+  api.debug(format!(">>> pot tax amount: {}", tax_amount.u128()).as_str());
+
+  // Set drawing total values
+  drawing.pot_payout = taxable_pot_payout_amount - tax_amount;
   drawing.incentive_payout = incentive_payout_amount;
-  drawing.total_payout = incentive_payout_amount + pot_payout_amount; // TODO: Deprecate this variable
+  drawing.total_payout = drawing.incentive_payout + drawing.pot_payout; // TODO: Deprecate this variable
   drawing.cursor = None;
 
   BALANCE_CLAIMABLE.update(storage, |total| -> Result<_, ContractError> {
@@ -399,43 +400,27 @@ pub fn end_draw(
 
   // Build message to take incentives from house
   let is_rolling = CONFIG_ROLLING.load(storage)?;
-  let total_payout = drawing.get_total_payout();
-  let has_surplus_balance = drawing.round_balance > total_payout;
-  let total_outgoing = total_payout;
-  let mut total_incoming = Uint128::zero();
+  let taxed_payout = drawing.resolve_total_payout(); // tax already deducted
 
-  if !is_rolling {
-    // if the lottery doesn't roll its balance into the next round, then the
-    // house takes all surplus balance on top of what it's already taking as
-    // tax.
-    total_incoming = drawing.round_balance;
-  } else if has_surplus_balance {
-    // if we're at a surplus after payout, just send the house it's taxes and
-    // keep the rest to "roll over" into next round
-    api.debug(
-      format!(
-        ">>> surplus balance: {:?}",
-        drawing.round_balance - total_payout
-      )
-      .as_str(),
-    );
-    total_incoming = drawing.get_total_payout();
+  let total_outgoing = taxed_payout;
+
+  let total_incoming: Uint128 = if !is_rolling {
+    drawing.round_balance
+  } else if drawing.round_balance >= taxed_payout + tax_amount {
+    taxed_payout + tax_amount
   } else {
-    // we're rolling over but don't have any surplus balance, which means we
-    // need the house to pay out as much or more than we are sending into it,
-    // so in this case, we just send in everything we've got.
-    total_incoming += drawing.round_balance;
-  }
-
-  api.debug(format!(">>> {:?}", drawing).as_str());
-  api.debug(format!(">>> house incoming : {:?}", total_incoming).as_str());
-  api.debug(format!(">>> house outgoing: {:?}", total_outgoing).as_str());
-
-  let house = House::new(&CONFIG_HOUSE_ADDR.load(storage)?);
+    drawing.round_balance
+  };
 
   reset_round_state(storage, env, ticket_count)?;
 
-  return Ok(Some(house.process(
+  api.debug(format!(">>> {:?}", drawing).as_str());
+  api.debug(format!(">>> house incoming : {:?}", total_incoming.u128()).as_str());
+  api.debug(format!(">>> house outgoing: {:?}", total_outgoing.u128()).as_str());
+
+  let house = House::new(&CONFIG_HOUSE_ADDR.load(storage)?);
+
+  Ok(Some(house.process(
     env.contract.address.clone(),
     // Incoming to house:
     Some(AccountTokenAmount::new(
@@ -449,7 +434,7 @@ pub fn end_draw(
     )),
     Some(funds.clone()),
     maybe_token_addr,
-  )?));
+  )?))
 }
 
 fn ensure_round_can_end(
@@ -466,25 +451,6 @@ fn ensure_round_can_end(
     }
   }
   Ok(())
-}
-
-fn build_tax_send_submsgs(
-  storage: &mut dyn Storage,
-  token: &Token,
-  balance: Uint128,
-) -> Result<(Vec<SubMsg>, Uint128), ContractError> {
-  // Build send SubMsgs for sending taxes
-  let mut send_submsgs: Vec<SubMsg> = Vec::with_capacity(5);
-  let mut total_amount = Uint128::zero();
-  for result in TAXES.range(storage, None, None, Order::Ascending) {
-    let (addr, pct) = result?;
-    let amount = balance.multiply_ratio(pct, Uint128::from(1_000_000u128));
-    if !amount.is_zero() {
-      send_submsgs.push(build_send_submsg(&addr, amount, token)?);
-      total_amount += amount;
-    }
-  }
-  Ok((send_submsgs, total_amount))
 }
 
 fn choose_winning_numbers(
