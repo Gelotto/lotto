@@ -13,9 +13,18 @@ pub struct InstantiateMsg {
 
 #[cw_serde]
 pub enum ExecuteMsg {
-  SetConfig { config: Config },
-  Buy { tickets: Vec<Vec<u16>> },
-  BuySeed { count: u16, seed: u32 },
+  SetConfig {
+    config: Config,
+  },
+  Buy {
+    player: Option<Addr>,
+    tickets: Vec<Vec<u16>>,
+  },
+  BuySeed {
+    player: Option<Addr>,
+    count: u16,
+    seed: u32,
+  },
   Draw {},
   Claim {},
   Withdraw {},

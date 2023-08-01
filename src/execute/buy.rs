@@ -4,8 +4,9 @@ use crate::{
   error::ContractError,
   models::{Account, Ticket},
   state::{
-    load_house, ACCOUNTS, CONFIG_MAX_NUMBER, CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN,
-    HOUSE_TICKET_TAX_PCT, ROUND_TICKETS, ROUND_TICKET_COUNT,
+    load_house, process_claim, require_active_game_state, ACCOUNTS, CLAIMS, CONFIG_MAX_NUMBER,
+    CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN, HOUSE_TICKET_TAX_PCT, ROUND_TICKETS,
+    ROUND_TICKET_COUNT,
   },
   util::{hash_numbers, mul_pct},
   xorshift32::Xorshift32,
@@ -24,11 +25,91 @@ pub fn buy_seed(
   deps: DepsMut,
   env: Env,
   info: MessageInfo,
+  maybe_player: Option<Addr>,
   ticket_count: u16,
   seed: u32,
 ) -> Result<Response, ContractError> {
   let tickets = generate_random_tickets(deps.storage, ticket_count, seed)?;
-  buy(deps, env, info, tickets)
+  buy(deps, env, info, maybe_player, tickets)
+}
+
+pub fn buy(
+  deps: DepsMut,
+  env: Env,
+  info: MessageInfo,
+  maybe_player: Option<Addr>,
+  tickets: Vec<Vec<u16>>,
+) -> Result<Response, ContractError> {
+  // Reject attempt to buy tickets if the lotto is currently drawing.
+  require_active_game_state(deps.storage)?;
+
+  // The player is the address on whose behalf tickets are bought. If not
+  // explicitly defined, default to the tx sender.
+  let player = maybe_player.unwrap_or(info.sender.clone());
+
+  // Upsert player account
+  ACCOUNTS.update(
+    deps.storage,
+    player.clone(),
+    |maybe_account| -> Result<_, ContractError> {
+      if let Some(mut account) = maybe_account {
+        account.totals.tickets += tickets.len() as u32;
+        Ok(account)
+      } else {
+        let mut account = Account::new();
+        account.totals.tickets = tickets.len() as u32;
+        Ok(account)
+      }
+    },
+  )?;
+
+  // Process each ticket ordered, updating state
+  for numbers in tickets.iter() {
+    process_ticket(deps.storage, &player, numbers.clone())?;
+  }
+
+  let ticket_price = CONFIG_PRICE.load(deps.storage)?;
+  let total_price = Uint128::from(tickets.len() as u64) * ticket_price;
+
+  let mut resp = Response::new().add_attributes(vec![attr("action", "buy")]);
+
+  // Ensure funds and take payment from sender
+  if let Some(msg) = take_payment(
+    deps.storage,
+    deps.querier,
+    &env.contract.address,
+    &info.funds,
+    &player,
+    total_price,
+  )? {
+    resp = resp.add_message(msg);
+  };
+
+  // Send the house its revenue (5% of ticket proceeds)
+  let token = CONFIG_TOKEN.load(deps.storage)?;
+  let house_take = mul_pct(total_price, HOUSE_TICKET_TAX_PCT.into());
+  let house = load_house(deps.storage)?;
+
+  resp = resp.add_messages(house.process(
+    info.sender.clone(),
+    Some(AccountTokenAmount::new(&env.contract.address, house_take)),
+    None,
+    Some(info.funds),
+    if let Token::Cw20 { address } = token {
+      Some(address)
+    } else {
+      None
+    },
+  )?);
+
+  // Process any outstanding claim for the player
+  if CLAIMS.has(deps.storage, player.clone()) {
+    if let Some(transfer_submsg) = process_claim(deps.storage, &info.sender)? {
+      resp = resp.add_submessage(transfer_submsg);
+    }
+  }
+
+  Ok(resp)
 }
 
 fn generate_random_tickets(
@@ -58,79 +139,12 @@ fn generate_random_tickets(
   Ok(tickets)
 }
 
-pub fn buy(
-  deps: DepsMut,
-  env: Env,
-  info: MessageInfo,
-  tickets: Vec<Vec<u16>>,
-) -> Result<Response, ContractError> {
-  let ticket_price = CONFIG_PRICE.load(deps.storage)?;
-  let total_price = Uint128::from(tickets.len() as u64) * ticket_price;
-  let house_take = mul_pct(total_price, HOUSE_TICKET_TAX_PCT.into());
-  let token = CONFIG_TOKEN.load(deps.storage)?;
-
-  // TODO: process any outstanding claim
-
-  // Upsert player account
-  ACCOUNTS.update(
-    deps.storage,
-    info.sender.clone(),
-    |maybe_account| -> Result<_, ContractError> {
-      if let Some(mut account) = maybe_account {
-        account.totals.tickets += tickets.len() as u32;
-        Ok(account)
-      } else {
-        let mut account = Account::new();
-        account.totals.tickets = tickets.len() as u32;
-        Ok(account)
-      }
-    },
-  )?;
-
-  // Process each ticket ordered, updating state
-  for numbers in tickets.iter() {
-    process_ticket(deps.storage, &info, numbers.clone())?;
-  }
-
-  let mut resp = Response::new().add_attributes(vec![attr("action", "buy")]);
-  let house = load_house(deps.storage)?;
-
-  // Ensure funds and take payment from sender
-  if let Some(msg) = take_payment(
-    deps.storage,
-    deps.querier,
-    &env.contract.address,
-    &info.funds,
-    &info.sender,
-    total_price,
-  )? {
-    resp = resp.add_message(msg);
-  };
-
-  // Send the house its revenue (5% of ticket proceeds)
-  resp = resp.add_messages(house.process(
-    info.sender,
-    Some(AccountTokenAmount::new(&env.contract.address, house_take)),
-    None,
-    Some(info.funds),
-    if let Token::Cw20 { address } = token {
-      Some(address)
-    } else {
-      None
-    },
-  )?);
-
-  Ok(resp)
-}
-
-pub fn process_ticket(
+fn process_ticket(
   storage: &mut dyn Storage,
-  info: &MessageInfo,
+  player: &Addr,
   numbers: Vec<u16>,
 ) -> Result<(), ContractError> {
   require_valid_numbers(storage, numbers.clone())?;
-
-  // TODO: auto-claim record exists
 
   // sort the numbers
   let mut sorted_numbers = numbers.clone();
@@ -138,7 +152,7 @@ pub fn process_ticket(
 
   // Build key into ticket map
   let hash = hash_numbers(&sorted_numbers);
-  let key = (info.sender.clone(), hash);
+  let key = (player.clone(), hash);
 
   // Insert the ticket or error out if the sender already has one.  NOTE: While
   // the ticket number hash is sorted, the vec stored in the map's values is

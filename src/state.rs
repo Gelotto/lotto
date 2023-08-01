@@ -2,12 +2,15 @@ use std::collections::{HashMap, HashSet};
 
 use crate::models::{Account, Claim, Config, Drawing, Payout, RoundStatus, Style, Ticket};
 use crate::msg::InstantiateMsg;
+use crate::util::calc_total_claim_amount;
 use crate::{error::ContractError, models::MarketingInfo};
 use cosmwasm_std::{
-  Addr, BlockInfo, Deps, DepsMut, Env, MessageInfo, Order, Storage, Timestamp, Uint128, Uint64,
+  Addr, BlockInfo, Deps, DepsMut, Env, MessageInfo, Order, Storage, SubMsg, Timestamp, Uint128,
+  Uint64,
 };
 use cw_acl::client::Acl;
 use cw_lib::models::{Owner, Token};
+use cw_lib::utils::funds::build_send_submsg;
 use cw_storage_plus::{Item, Map};
 use house_staking::client::House;
 
@@ -210,4 +213,41 @@ pub fn load_tickets_by_account(
       .map(|r| r.unwrap().1)
       .collect(),
   )
+}
+
+pub fn process_claim(
+  storage: &mut dyn Storage,
+  sender: &Addr,
+) -> Result<Option<SubMsg>, ContractError> {
+  let claim = load_claim(storage, sender)?;
+  let drawing = load_drawing(storage, claim.round_no)?;
+  let payouts = load_payouts(storage)?;
+  let token = CONFIG_TOKEN.load(storage)?;
+  let claim_amount = calc_total_claim_amount(&claim, &drawing, &payouts);
+
+  CLAIMS.remove(storage, sender.clone());
+
+  BALANCE_CLAIMABLE.update(storage, |total| -> Result<_, ContractError> {
+    Ok(total - claim_amount)
+  })?;
+
+  ACCOUNTS.update(
+    storage,
+    sender.clone(),
+    |maybe_account| -> Result<_, ContractError> {
+      if let Some(mut account) = maybe_account {
+        account.totals.winnings = claim_amount;
+        account.totals.wins += claim.matches.iter().map(|x| *x as u32).sum::<u32>();
+        Ok(account)
+      } else {
+        Err(ContractError::AccountNotFound)
+      }
+    },
+  )?;
+
+  Ok(if claim_amount.is_zero() {
+    None
+  } else {
+    Some(build_send_submsg(&sender, claim_amount, &token)?)
+  })
 }
