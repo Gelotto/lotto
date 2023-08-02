@@ -289,13 +289,13 @@ pub fn reset_round_state(
 ) -> Result<(), ContractError> {
   ROUND_STATUS.save(storage, &RoundStatus::Active)?;
   ROUND_START.save(storage, &env.block.time)?;
+  ROUND_NO.update(storage, |n| -> Result<_, ContractError> {
+    Ok(n + Uint64::one())
+  })?;
   // only bother clearing round state data structures if any tickets were sold
   if current_ticket_count > 0 {
     ROUND_TICKETS.clear(storage);
     ROUND_TICKET_COUNT.save(storage, &0)?;
-    ROUND_NO.update(storage, |n| -> Result<_, ContractError> {
-      Ok(n + Uint64::one())
-    })?;
   }
 
   // If there is a new config staged, then we update the config vars here at the
