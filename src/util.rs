@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use cosmwasm_std::Uint128;
 
-use crate::models::{Claim, Drawing, Payout};
+use crate::{
+  models::{Claim, Drawing, Payout},
+  state::HOUSE_POT_TAX_PCT,
+};
 
 pub fn hash_numbers(numbers: &Vec<u16>) -> String {
   let parts: Vec<String> = numbers.iter().map(|n| n.to_string()).collect();
@@ -22,7 +25,10 @@ pub fn calc_total_claim_amount(
   payouts: &HashMap<u8, Payout>,
 ) -> Uint128 {
   let mut claim_amount = Uint128::zero();
-  let total_pot = drawing.resolve_taxed_pot_size();
+  let total_pot = mul_pct(
+    drawing.resolve_pot_size(),
+    Uint128::from(1000000u128) - Uint128::from(HOUSE_POT_TAX_PCT),
+  );
   for (match_count, n_tickets) in claim.matches.iter().enumerate().skip(1) {
     if let Some(payout) = payouts.get(&(match_count as u8)) {
       let n_total_tickets = drawing.match_counts[match_count] as u32;

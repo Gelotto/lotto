@@ -79,7 +79,7 @@ pub fn buy(
     deps.querier,
     &env.contract.address,
     &info.funds,
-    &player,
+    &info.sender,
     total_price,
   )? {
     resp = resp.add_message(msg);

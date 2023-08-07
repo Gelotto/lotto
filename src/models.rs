@@ -4,11 +4,7 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Api, Timestamp, Uint128, Uint64};
 use cw_lib::models::Token;
 
-use crate::{
-  error::ContractError,
-  state::HOUSE_POT_TAX_PCT,
-  util::{calc_total_claim_amount, mul_pct},
-};
+use crate::{error::ContractError, util::calc_total_claim_amount};
 
 #[cw_serde]
 pub enum RoundStatus {
@@ -183,14 +179,6 @@ impl Drawing {
 
   pub fn resolve_pot_size(&self) -> Uint128 {
     self.start_balance + self.round_balance
-  }
-
-  pub fn resolve_taxed_pot_size(&self) -> Uint128 {
-    self.start_balance
-      + mul_pct(
-        self.round_balance,
-        Uint128::from(1_000_000u128) - Uint128::from(HOUSE_POT_TAX_PCT),
-      )
   }
 }
 

@@ -405,10 +405,20 @@ pub fn end_draw(
   let total_outgoing = taxed_payout;
 
   let total_incoming: Uint128 = if !is_rolling {
+    // Not rolling means that the entire round's balance goes to the house
+    // regardless of the payout.
     drawing.round_balance
   } else if drawing.round_balance >= taxed_payout + tax_amount {
+    // If the round ended with a surplus balance, beyond the pre-taxed total
+    // payout, we can safely send the house this net amount. Since the amount in
+    // includes tax but the payout does not, this effectively pays only taxes to
+    // the house.
     taxed_payout + tax_amount
   } else {
+    // However, if there's not enough balance to cover the total payout, we send
+    // the house whatever we've got. In this case (like non-rolling games), the
+    // house will pay the difference, outgoing_amount -
+    // incoming_amount.
     drawing.round_balance
   };
 
@@ -489,7 +499,7 @@ fn compute_winning_numbers(
   ]);
 
   while winning_numbers.len() < number_count as usize {
-    winning_numbers.insert((rng.next_u64() % (max_value as u64)) as u16);
+    winning_numbers.insert((rng.next_u64() % ((max_value + 1) as u64)) as u16);
   }
 
   Ok(winning_numbers.iter().map(|x| *x).collect())
