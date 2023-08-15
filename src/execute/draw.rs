@@ -8,11 +8,10 @@ use crate::{
   models::{Claim, Drawing, Payout, RoundStatus},
   state::{
     load_drawing, load_payouts, load_tickets_by_account, load_winning_numbers, BALANCE_CLAIMABLE,
-    CLAIMS, CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MARKETING, CONFIG_MAX_NUMBER,
-    CONFIG_MIN_BALANCE, CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROLLING,
-    CONFIG_ROUND_SECONDS, CONFIG_STYLE, CONFIG_TOKEN, DEBUG_WINNING_NUMBERS, DRAWINGS,
-    HOUSE_POT_TAX_PCT, ROUND_NO, ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT,
-    STAGED_CONFIG,
+    CLAIMS, CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE,
+    CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROLLING, CONFIG_ROUND_SECONDS,
+    CONFIG_TOKEN, DEBUG_WINNING_NUMBERS, DRAWINGS, HOUSE_POT_TAX_PCT, ROUND_NO, ROUND_START,
+    ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, STAGED_CONFIG,
   },
   util::mul_pct,
 };
@@ -136,6 +135,7 @@ pub fn start_processing_tickets(
       &info.funds,
       &payouts,
       &mut drawing,
+      contract_balance,
     )? {
       resp = resp.add_messages(house_msgs);
     }
@@ -264,6 +264,8 @@ pub fn process_next_ticket_batch(
 
   // Reset contract state for next round.
   if drawing.is_complete() {
+    let token = CONFIG_TOKEN.load(deps.storage)?;
+    let contract_balance = get_token_balance(deps.querier, &env.contract.address, &token)?;
     if let Some(house_msgs) = end_draw(
       deps.storage,
       deps.api,
@@ -271,6 +273,7 @@ pub fn process_next_ticket_batch(
       &info.funds,
       &payouts,
       &mut drawing,
+      contract_balance,
     )? {
       resp = resp.add_messages(house_msgs);
     }
@@ -303,15 +306,12 @@ pub fn reset_round_state(
   // var, since this must remain constant for the claim and withdraw to continue
   // working.
   if let Some(new_config) = STAGED_CONFIG.load(storage)? {
-    CONFIG_HOUSE_ADDR.save(storage, &new_config.house_address)?;
     CONFIG_MAX_NUMBER.save(storage, &new_config.max_number)?;
     CONFIG_MIN_BALANCE.save(storage, &new_config.min_balance)?;
     CONFIG_NUMBER_COUNT.save(storage, &new_config.number_count)?;
     CONFIG_ROLLING.save(storage, &new_config.rolling)?;
     CONFIG_ROUND_SECONDS.save(storage, &new_config.round_seconds)?;
-    CONFIG_MARKETING.save(storage, &new_config.marketing)?;
     CONFIG_PRICE.save(storage, &new_config.price)?;
-    CONFIG_STYLE.save(storage, &new_config.style)?;
 
     CONFIG_PAYOUTS.clear(storage);
     for payout in new_config.payouts {
@@ -333,6 +333,7 @@ pub fn end_draw(
   funds: &Vec<Coin>,
   payouts: &HashMap<u8, Payout>,
   drawing: &mut Drawing,
+  _contract_balance: Uint128,
 ) -> Result<Option<Vec<WasmMsg>>, ContractError> {
   let ticket_count = ROUND_TICKET_COUNT.load(storage)?;
 

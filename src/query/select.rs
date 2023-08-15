@@ -76,31 +76,30 @@ pub fn select(
       ))
     })?,
 
-    account: loader.view("account", |maybe_addr| {
-      if let Some(addr) = maybe_addr {
-        let maybe_account = ACCOUNTS.may_load(deps.storage, addr.clone())?;
-        if let Some(account) = maybe_account {
-          let maybe_claim = match CLAIMS.may_load(deps.storage, addr.clone())? {
-            Some(mut claim) => {
-              let drawing = DRAWINGS.load(deps.storage, claim.round_no.into())?;
-              let payouts = load_payouts(deps.storage).unwrap();
-              claim.amount = Some(calc_total_claim_amount(&claim, &drawing, &payouts));
-              Some(claim)
-            },
-            None => None,
-          };
-          return Ok(Some(AccountView {
-            totals: account.totals,
-            claim: maybe_claim,
-            tickets: ROUND_TICKETS
-              .prefix(addr.clone())
-              .range(deps.storage, None, None, Order::Ascending)
-              .map(|r| r.unwrap().1)
-              .collect(),
-          }));
-        }
+    account: loader.view("account", |addr| {
+      let maybe_account = ACCOUNTS.may_load(deps.storage, addr.clone())?;
+      if let Some(account) = maybe_account {
+        let maybe_claim = match CLAIMS.may_load(deps.storage, addr.clone())? {
+          Some(mut claim) => {
+            let drawing = DRAWINGS.load(deps.storage, claim.round_no.into())?;
+            let payouts = load_payouts(deps.storage).unwrap();
+            claim.amount = Some(calc_total_claim_amount(&claim, &drawing, &payouts));
+            Some(claim)
+          },
+          None => None,
+        };
+        return Ok(Some(AccountView {
+          totals: account.totals,
+          claim: maybe_claim,
+          tickets: ROUND_TICKETS
+            .prefix(addr.clone())
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|r| r.unwrap().1)
+            .collect(),
+        }));
+      } else {
+        Ok(None)
       }
-      Ok(None)
     })?,
   })
 }

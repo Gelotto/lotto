@@ -58,13 +58,9 @@ function deploy() {
   while [[ $CODE_ID == "" ]]
   do 
       sleep 3  # wait for wasm store command to complete
-
       echo "junod query tx $UPLOADTX $NODECHAIN --output json | jq -r $CODE_ID_JSON_PATH"
-
       exec_result=$(junod query tx $UPLOADTX $NODECHAIN --output json)
-
       echo "$exec_result" | jq
-
       CODE_ID=$(echo "$exec_result" | jq -r $CODE_ID_JSON_PATH)
   done
 
@@ -93,17 +89,24 @@ function deploy_local() {
     --chain-id testing \
     --from $SENDER \
     --output json \
-    -b block \
     -y)"
 
   mkdir -p $BUILD_DIR
 
-  CODE_ID=$(echo "$RESP" | jq -r '.logs[0].events[-1].attributes[-1].value')
+  TXHASH=$(echo "$RESP" | jq -r '.txhash')
+  CODE_ID=""
+  while [[ $CODE_ID == "" && $CODE_ID != "null" ]]
+  do
+    sleep 3
+    CODE_ID=$(junod query tx $TXHASH --chain-id testing --output json 2>/dev/null \
+        | jq -r '.logs[0].events[-1].attributes[-1].value')
+  done
+
   echo "$CODE_ID" >"$BUILD_DIR/$CODE_ID_FILENAME"
 
   cp $WASM_FILEPATH "$BUILD_DIR/"
 
-  echo $RESP
+  echo "$(junod query tx $TXHASH --chain-id testing --output json 2>/dev/null)"
 }
 
 # program point of entry

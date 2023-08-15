@@ -154,10 +154,9 @@ fn process_ticket(
   let hash = hash_numbers(&sorted_numbers);
   let key = (player.clone(), hash);
 
-  // Insert the ticket or error out if the sender already has one.  NOTE: While
-  // the ticket number hash is sorted, the vec stored in the map's values is
-  // not. This can hypothetically let us check whether the ticket matches with
-  // respect to order (permutations rather than combinations).
+  // While the ticket number hash is sorted, the vec stored in the map's values
+  // is not. This can hypothetically let us check whether the ticket matches
+  // with respect to order (permutations rather than combinations).
   ROUND_TICKETS.update(storage, key, |maybe_ticket| -> Result<_, ContractError> {
     if let Some(mut ticket) = maybe_ticket {
       ticket.n += 1;
