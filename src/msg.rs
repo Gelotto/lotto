@@ -36,7 +36,10 @@ pub enum QueryMsg {
   Drawing {
     round_no: Option<Uint64>,
   },
-  // Claim {},
+  Claims {
+    cursor: Option<Addr>,
+    limit: Option<u8>,
+  },
   Select {
     fields: Option<Vec<String>>,
     wallet: Option<Addr>,

@@ -53,7 +53,7 @@ pub fn query(
     QueryMsg::Select { fields, wallet } => to_binary(&query::select(deps, env, fields, wallet)?),
     QueryMsg::Drawing { round_no } => to_binary(&query::drawing(deps, round_no)?),
     QueryMsg::Ready => to_binary(&query::ready(deps, env)?),
-    // QueryMsg::Claim {} => to_binary(&query::claims(deps, maybe_cursor, maybe_limit))
+    QueryMsg::Claims { cursor, limit } => to_binary(&query::claims(deps, cursor, limit)?),
   }?;
   Ok(result)
 }

@@ -66,7 +66,7 @@ pub fn start_processing_tickets(
   // the round and prepare for the next.
   if ticket_count == 0 {
     resp = resp.add_attribute("is_complete", true.to_string());
-    reset_round_state(deps.storage, &env, ticket_count)?;
+    reset_round_state(deps.storage, &env)?;
     return Ok(resp);
   }
 
@@ -288,18 +288,14 @@ pub fn process_next_ticket_batch(
 pub fn reset_round_state(
   storage: &mut dyn Storage,
   env: &Env,
-  current_ticket_count: u32,
 ) -> Result<(), ContractError> {
   ROUND_STATUS.save(storage, &RoundStatus::Active)?;
   ROUND_START.save(storage, &env.block.time)?;
   ROUND_NO.update(storage, |n| -> Result<_, ContractError> {
     Ok(n + Uint64::one())
   })?;
-  // only bother clearing round state data structures if any tickets were sold
-  if current_ticket_count > 0 {
-    ROUND_TICKETS.clear(storage);
-    ROUND_TICKET_COUNT.save(storage, &0)?;
-  }
+  ROUND_TICKETS.clear(storage);
+  ROUND_TICKET_COUNT.save(storage, &0)?;
 
   // If there is a new config staged, then we update the config vars here at the
   // end of the latest (this) draw. Note that we never update the TOKEN config
@@ -335,8 +331,6 @@ pub fn end_draw(
   drawing: &mut Drawing,
   _contract_balance: Uint128,
 ) -> Result<Option<Vec<WasmMsg>>, ContractError> {
-  let ticket_count = ROUND_TICKET_COUNT.load(storage)?;
-
   // If maybe_drawing is None, it means that there are no tickets, so we skip
   // the follow.
   //
@@ -423,7 +417,7 @@ pub fn end_draw(
     drawing.round_balance
   };
 
-  reset_round_state(storage, env, ticket_count)?;
+  reset_round_state(storage, env)?;
 
   api.debug(format!(">>> {:?}", drawing).as_str());
   api.debug(format!(">>> house incoming : {:?}", total_incoming.u128()).as_str());

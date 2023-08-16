@@ -1,6 +1,6 @@
 [package]
-name = "cw-contract"
-version = "0.0.5"
+name = "cw-lotto"
+version = "0.0.6"
 authors = []
 edition = "2021"
 description = "Smart Contract"
@@ -39,7 +39,7 @@ serde = { version = "1.0.160", default-features = false, features = ["derive"] }
 thiserror = { version = "1.0.40" }
 cw_repository = { version = "0.0.3", path = "../cw-repository", features = ["library"] }
 cw-acl = { version = "0.0.4", path = "../cw-acl", features = ["library"] }
-cw-lib = { version = "0.2.0", path = "../cw-lib" }
+cw-lib = { version = "0.3.0", path = "../cw-lib" }
 house-staking = { version = "0.0.5", path = "../house-staking", features = ["library"] }
 
 [dev-dependencies]

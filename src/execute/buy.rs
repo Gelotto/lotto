@@ -104,7 +104,7 @@ pub fn buy(
 
   // Process any outstanding claim for the player
   if CLAIMS.has(deps.storage, player.clone()) {
-    if let Some(transfer_submsg) = process_claim(deps.storage, &info.sender)? {
+    if let Some(transfer_submsg) = process_claim(deps.storage, &player)? {
       resp = resp.add_submessage(transfer_submsg);
     }
   }

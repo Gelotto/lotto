@@ -32,11 +32,11 @@ pub fn select(
   Ok(SelectResponse {
     owner: loader.get("owner", &OWNER)?,
 
-    balance: loader.view("balance", |_| Ok(Some(contract_balance)))?,
+    balance: loader.view("balance", || Ok(Some(contract_balance)))?,
 
     balance_claimable: Some(balance_claimable),
 
-    round: loader.view("round", |_| {
+    round: loader.view("round", || {
       Ok(Some(Round {
         start: round_start.clone(),
         end: round_start.plus_seconds(round_seconds.into()),
@@ -47,7 +47,7 @@ pub fn select(
       }))
     })?,
 
-    config: loader.view("config", |_| {
+    config: loader.view("config", || {
       Ok(Some(Config {
         marketing: CONFIG_MARKETING.load(deps.storage)?,
         max_number: CONFIG_MAX_NUMBER.load(deps.storage)?,
@@ -67,7 +67,7 @@ pub fn select(
       }))
     })?,
 
-    tax_rate: loader.view("tax_rate", |_| {
+    tax_rate: loader.view("tax_rate", || {
       Ok(Some(
         TAXES
           .range(deps.storage, None, None, Order::Ascending)
@@ -76,7 +76,7 @@ pub fn select(
       ))
     })?,
 
-    account: loader.view("account", |addr| {
+    account: loader.account_view("account", |addr| {
       let maybe_account = ACCOUNTS.may_load(deps.storage, addr.clone())?;
       if let Some(account) = maybe_account {
         let maybe_claim = match CLAIMS.may_load(deps.storage, addr.clone())? {
