@@ -9,6 +9,9 @@ pub enum ContractError {
   #[error("NotAuthorized")]
   NotAuthorized,
 
+  #[error("NotActive: try again after the current drawing ends")]
+  NotActive,
+
   #[error("TicketExists")]
   TicketExists,
 

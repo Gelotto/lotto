@@ -119,8 +119,12 @@ pub fn ensure_sender_is_allowed(
   }
 }
 
-pub fn require_active_game_state(storage: &dyn Storage) -> Result<bool, ContractError> {
-  Ok(ROUND_STATUS.load(storage)? == RoundStatus::Active)
+pub fn require_active_game_state(storage: &dyn Storage) -> Result<(), ContractError> {
+  if ROUND_STATUS.load(storage)? != RoundStatus::Active {
+    Err(ContractError::NotActive)
+  } else {
+    Ok(())
+  }
 }
 
 pub fn load_house(storage: &dyn Storage) -> Result<House, ContractError> {
