@@ -39,6 +39,7 @@ pub struct Payout {
   pub n: u8,
   pub incentive: Uint128,
   pub pct: Uint128,
+  pub max_win_count: Option<u32>,
 }
 
 #[cw_serde]

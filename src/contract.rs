@@ -30,12 +30,13 @@ pub fn execute(
   msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
   match msg {
-    ExecuteMsg::Buy { player, tickets } => execute::buy(deps, env, info, player, tickets),
+    ExecuteMsg::Buy { player, tickets } => execute::buy(deps, env, info, player, tickets, None),
     ExecuteMsg::BuySeed {
       player,
       count,
       seed,
     } => execute::buy_seed(deps, env, info, player, count, seed),
+    ExecuteMsg::Gift { gifts } => execute::gift(deps, env, info, gifts),
     ExecuteMsg::Draw {} => execute::draw(deps, env, info),
     ExecuteMsg::Claim {} => execute::claim(deps, env, info),
     ExecuteMsg::Withdraw {} => execute::withdraw(deps, env, info),

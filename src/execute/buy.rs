@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::{
   error::ContractError,
   models::{Account, Ticket},
+  msg::Gift,
   state::{
     load_house, process_claim, require_active_game_state, ACCOUNTS, CLAIMS, CONFIG_MAX_NUMBER,
     CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN, HOUSE_TICKET_TAX_PCT, ROUND_TICKETS,
@@ -21,6 +22,17 @@ use cw_lib::{
 };
 use house_staking::models::AccountTokenAmount;
 
+pub fn gift(
+  deps: DepsMut,
+  env: Env,
+  info: MessageInfo,
+  gifts: Vec<Gift>,
+) -> Result<Response, ContractError> {
+  let resp = Response::new().add_attributes(vec![attr("action", "buy")])
+  let tickets = generate_random_tickets(deps.storage, ticket_count, seed)?;
+  buy(deps, env, info, maybe_player, tickets, Some(resp))
+}
+
 pub fn buy_seed(
   deps: DepsMut,
   env: Env,
@@ -30,7 +42,7 @@ pub fn buy_seed(
   seed: u32,
 ) -> Result<Response, ContractError> {
   let tickets = generate_random_tickets(deps.storage, ticket_count, seed)?;
-  buy(deps, env, info, maybe_player, tickets)
+  buy(deps, env, info, maybe_player, tickets, None)
 }
 
 pub fn buy(
@@ -39,6 +51,7 @@ pub fn buy(
   info: MessageInfo,
   maybe_player: Option<Addr>,
   tickets: Vec<Vec<u16>>,
+  resp: Option<Response>,
 ) -> Result<Response, ContractError> {
   // Reject attempt to buy tickets if the lotto is currently drawing.
   require_active_game_state(deps.storage)?;
@@ -71,7 +84,11 @@ pub fn buy(
   let ticket_price = CONFIG_PRICE.load(deps.storage)?;
   let total_price = Uint128::from(tickets.len() as u64) * ticket_price;
 
-  let mut resp = Response::new().add_attributes(vec![attr("action", "buy")]);
+  let mut resp = if let Some(resp) = resp {
+    resp.clone()
+  } else {
+    Response::new().add_attributes(vec![attr("action", "buy")])
+  };
 
   // Ensure funds and take payment from sender
   if let Some(msg) = take_payment(

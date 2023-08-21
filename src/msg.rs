@@ -12,6 +12,13 @@ pub struct InstantiateMsg {
 }
 
 #[cw_serde]
+pub struct Gift {
+  pub seed: u32,
+  pub recipient: Addr,
+  pub ticket_count: u16,
+}
+
+#[cw_serde]
 pub enum ExecuteMsg {
   SetConfig {
     config: Config,
@@ -24,6 +31,9 @@ pub enum ExecuteMsg {
     player: Option<Addr>,
     count: u16,
     seed: u32,
+  },
+  Gift {
+    gifts: Vec<Gift>,
   },
   Draw {},
   Claim {},
