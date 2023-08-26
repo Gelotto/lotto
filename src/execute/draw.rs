@@ -33,14 +33,24 @@ pub fn draw(
   deps: DepsMut,
   env: Env,
   info: MessageInfo,
+  maybe_entropy: Option<String>,
 ) -> Result<Response, ContractError> {
   if info.sender != CONFIG_DRAWER.load(deps.storage)? {
     return Err(ContractError::NotAuthorized);
   }
+
   let round_no = ROUND_NO.load(deps.storage)?;
+
   match ROUND_STATUS.load(deps.storage)? {
-    RoundStatus::Active => start_processing_tickets(deps, env, info, round_no),
-    RoundStatus::Drawing => process_next_ticket_batch(deps, env, info, round_no),
+    RoundStatus::Active => {
+      // draw winning numbers and process first page of tickets
+      let entropy = maybe_entropy.unwrap_or_default();
+      start_processing_tickets(deps, env, info, round_no, entropy)
+    },
+    RoundStatus::Drawing => {
+      // process the next page of tickets
+      process_next_ticket_batch(deps, env, info, round_no)
+    },
   }
 }
 
@@ -49,6 +59,7 @@ pub fn start_processing_tickets(
   env: Env,
   info: MessageInfo,
   round_no: Uint64,
+  entropy: String,
 ) -> Result<Response, ContractError> {
   ensure_round_can_end(deps.storage, &env.block)?;
 
@@ -85,7 +96,7 @@ pub fn start_processing_tickets(
     .debug(format!(">>> taxable balance: {}", taxable_balance.u128()).as_str());
 
   // Select and save the winning numbers
-  let winning_numbers = choose_winning_numbers(deps.storage, &env)?;
+  let winning_numbers = choose_winning_numbers(deps.storage, &env, &entropy)?;
 
   deps
     .api
@@ -461,16 +472,18 @@ fn ensure_round_can_end(
 fn choose_winning_numbers(
   storage: &mut dyn Storage,
   env: &Env,
+  entropy: &String,
 ) -> Result<HashSet<u16>, ContractError> {
   let round_no = ROUND_NO.load(storage)?;
-  let numbers = compute_winning_numbers(storage, round_no, &env)?;
+  let numbers = compute_winning_numbers(storage, &env, round_no, entropy)?;
   Ok(HashSet::from_iter(numbers.iter().map(|x| *x)))
 }
 
 fn compute_winning_numbers(
   storage: &dyn Storage,
-  round_no: Uint64,
   env: &Env,
+  round_no: Uint64,
+  entropy: &String,
 ) -> Result<Vec<u16>, ContractError> {
   if let Some(debug_winning_numbers) = DEBUG_WINNING_NUMBERS.load(storage)? {
     return Ok(debug_winning_numbers);
@@ -480,9 +493,10 @@ fn compute_winning_numbers(
   let max_value = CONFIG_MAX_NUMBER.load(storage)?;
   let mut winning_numbers: HashSet<u16> = HashSet::with_capacity(number_count as usize);
   let mut rng = Pcg64::from_components(&vec![
+    RngComponent::Int(round_no.u64()),
+    RngComponent::Str(entropy.clone()),
     RngComponent::Str(env.contract.address.to_string()),
     RngComponent::Int(env.block.height),
-    RngComponent::Int(round_no.u64()),
     RngComponent::Int(env.block.time.nanos()),
     RngComponent::Int(
       env

@@ -36,7 +36,7 @@ pub fn execute(
       count,
       seed,
     } => execute::buy_seed(deps, env, info, player, count, seed),
-    ExecuteMsg::Draw {} => execute::draw(deps, env, info),
+    ExecuteMsg::Draw { entropy } => execute::draw(deps, env, info, entropy),
     ExecuteMsg::Claim {} => execute::claim(deps, env, info),
     ExecuteMsg::Withdraw {} => execute::withdraw(deps, env, info),
     ExecuteMsg::SetConfig { config } => execute::set_config(deps, env, info, config),

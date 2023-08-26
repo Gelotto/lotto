@@ -25,7 +25,9 @@ pub enum ExecuteMsg {
     count: u16,
     seed: u32,
   },
-  Draw {},
+  Draw {
+    entropy: Option<String>,
+  },
   Claim {},
   Withdraw {},
 }
