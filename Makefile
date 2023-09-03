@@ -31,7 +31,7 @@ transfer-ownership:
 	./client.sh transfer-ownership $(network) $(tag) $(sender)
 
 select:
-	./client.sh query-select $(network) $(tag)
+	./client.sh query-select $(network) $(tag) $(sender)
 
 drawing:
 	./client.sh query-drawing $(network) $(tag)

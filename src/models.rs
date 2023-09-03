@@ -26,6 +26,8 @@ pub struct Config {
   pub rolling: bool,
   pub min_balance: Uint128,
   pub drawer: Addr,
+  pub batch_size: Option<u16>,
+  pub use_approval: Option<bool>,
 }
 
 #[cw_serde]
@@ -97,8 +99,9 @@ pub struct Win {
 pub struct Claim {
   pub round_no: Uint64,
   pub amount: Option<Uint128>,
-  pub tickets: Vec<Ticket>,
+  pub tickets: Option<Vec<Ticket>>,
   pub matches: Vec<u16>,
+  pub is_approved: bool,
 }
 
 #[cw_serde]

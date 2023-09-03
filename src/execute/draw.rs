@@ -5,13 +5,13 @@ use std::{
 
 use crate::{
   error::ContractError,
-  models::{Claim, Drawing, Payout, RoundStatus},
+  models::{Claim, Drawing, Payout, RoundStatus, Ticket},
   state::{
-    load_drawing, load_payouts, load_tickets_by_account, load_winning_numbers, BALANCE_CLAIMABLE,
+    draw_winning_numbers, load_drawing, load_payouts, load_winning_numbers, BALANCE_CLAIMABLE,
     CLAIMS, CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE,
     CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROLLING, CONFIG_ROUND_SECONDS,
-    CONFIG_TOKEN, DEBUG_WINNING_NUMBERS, DRAWINGS, HOUSE_POT_TAX_PCT, ROUND_NO, ROUND_START,
-    ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, STAGED_CONFIG,
+    CONFIG_TICKET_BATCH_SIZE, CONFIG_TOKEN, DRAWINGS, HOUSE_POT_TAX_PCT, JACKPOT_CLAIMANTS,
+    ROUND_NO, ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, STAGED_CONFIG,
   },
   util::mul_pct,
 };
@@ -19,15 +19,9 @@ use cosmwasm_std::{
   attr, Addr, Api, BlockInfo, Coin, DepsMut, Env, MessageInfo, Order, Response, Storage, Uint128,
   Uint64, WasmMsg,
 };
-use cw_lib::{
-  models::Token,
-  random::{Pcg64, RngComponent},
-  utils::funds::get_token_balance,
-};
-use cw_storage_plus::Bound;
+use cw_lib::{models::Token, utils::funds::get_token_balance};
+use cw_storage_plus::{Bound, Map};
 use house_staking::{client::House, models::AccountTokenAmount};
-
-pub const TICKET_PAGE_SIZE: usize = 1000;
 
 pub fn draw(
   deps: DepsMut,
@@ -96,7 +90,7 @@ pub fn start_processing_tickets(
     .debug(format!(">>> taxable balance: {}", taxable_balance.u128()).as_str());
 
   // Select and save the winning numbers
-  let winning_numbers = choose_winning_numbers(deps.storage, &env, &entropy)?;
+  let winning_numbers = draw_winning_numbers(deps.storage, &env, &entropy, None, None, None)?;
 
   deps
     .api
@@ -174,6 +168,8 @@ pub fn process_next_page(
     None
   };
 
+  let page_size = CONFIG_TICKET_BATCH_SIZE.load(storage)? as usize;
+
   // Total number of tickets processed in this call:
   let mut processed_ticket_count: u32 = 0;
 
@@ -191,12 +187,17 @@ pub fn process_next_page(
   // number of matches was encountered:
   let mut match_counts: Vec<u16> = vec![0; winning_numbers.len() + 1];
 
+  // accumulator for winning tickets, saved to state below.
+  let mut claim_tickets: HashMap<Addr, Vec<(String, Ticket)>> = HashMap::with_capacity(64);
+
+  let mut jackpot_claimant_addrs: Vec<Addr> = vec![];
+
   api.debug(format!(">>> initialized match_counts: {:?}", match_counts).as_str());
 
   // Process each ticket in the batch...
   for result in ROUND_TICKETS
     .range(storage, min, None, Order::Ascending)
-    .take(TICKET_PAGE_SIZE)
+    .take(page_size)
   {
     let ((addr, hash), ticket) = result?;
 
@@ -222,9 +223,10 @@ pub fn process_next_page(
       let claim: &mut Claim = {
         if claims.get(&addr).is_none() {
           let new_claim = Claim {
+            is_approved: false,
             round_no: round_no.into(),
-            tickets: load_tickets_by_account(storage, &addr)?,
             matches: vec![0; winning_numbers.len() + 1],
+            tickets: None,
             amount: None,
           };
           claims.insert(addr.clone(), new_claim);
@@ -233,12 +235,38 @@ pub fn process_next_page(
       };
 
       claim.matches[n_matching_numbers as usize] += ticket.n;
+
+      if n_matching_numbers as usize == winning_numbers.len() {
+        jackpot_claimant_addrs.push(addr.clone());
+      }
+
+      // Collect winning ticket into the account's "claim tickets" vec. These
+      // are saved to state below, in a dynamic map associated with the ticket
+      // holder's address.
+      if let Some(tickets_vec) = claim_tickets.get_mut(&addr) {
+        tickets_vec.push((hash, ticket))
+      } else {
+        claim_tickets.insert(addr, vec![(hash, ticket)]);
+      }
     }
+  }
+
+  for addr in jackpot_claimant_addrs.iter() {
+    JACKPOT_CLAIMANTS.save(storage, addr, &true)?;
   }
 
   // Save new or updated Claims.
   for (addr, claim) in claims.iter() {
     CLAIMS.save(storage, addr.clone(), claim)?;
+
+    // Save winning tickets corresponding to the upserted Claims
+    let map_tag = format!("claim_tickets_{}", addr.to_string());
+    let map: Map<String, Ticket> = Map::new(map_tag.as_str());
+    if let Some(tickets_vec) = claim_tickets.get(addr) {
+      for (hash, ticket) in tickets_vec.iter() {
+        map.save(storage, hash.clone(), &ticket)?;
+      }
+    }
   }
 
   // Update the current Drawing
@@ -467,49 +495,4 @@ fn ensure_round_can_end(
     }
   }
   Ok(())
-}
-
-fn choose_winning_numbers(
-  storage: &mut dyn Storage,
-  env: &Env,
-  entropy: &String,
-) -> Result<HashSet<u16>, ContractError> {
-  let round_no = ROUND_NO.load(storage)?;
-  let numbers = compute_winning_numbers(storage, &env, round_no, entropy)?;
-  Ok(HashSet::from_iter(numbers.iter().map(|x| *x)))
-}
-
-fn compute_winning_numbers(
-  storage: &dyn Storage,
-  env: &Env,
-  round_no: Uint64,
-  entropy: &String,
-) -> Result<Vec<u16>, ContractError> {
-  if let Some(debug_winning_numbers) = DEBUG_WINNING_NUMBERS.load(storage)? {
-    return Ok(debug_winning_numbers);
-  }
-
-  let number_count = CONFIG_NUMBER_COUNT.load(storage)?;
-  let max_value = CONFIG_MAX_NUMBER.load(storage)?;
-  let mut winning_numbers: HashSet<u16> = HashSet::with_capacity(number_count as usize);
-  let mut rng = Pcg64::from_components(&vec![
-    RngComponent::Int(round_no.u64()),
-    RngComponent::Str(entropy.clone()),
-    RngComponent::Str(env.contract.address.to_string()),
-    RngComponent::Int(env.block.height),
-    RngComponent::Int(env.block.time.nanos()),
-    RngComponent::Int(
-      env
-        .transaction
-        .clone()
-        .and_then(|t| Some(t.index as u64))
-        .unwrap_or(0u64),
-    ),
-  ]);
-
-  while winning_numbers.len() < number_count as usize {
-    winning_numbers.insert((rng.next_u64() % ((max_value + 1) as u64)) as u16);
-  }
-
-  Ok(winning_numbers.iter().map(|x| *x).collect())
 }

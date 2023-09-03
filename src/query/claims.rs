@@ -49,5 +49,5 @@ pub fn claims(
     claim.amount = Some(calc_total_claim_amount(&claim, &drawing, payouts))
   }
 
-  Ok(Vec::new())
+  Ok(claims)
 }

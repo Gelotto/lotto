@@ -50,4 +50,13 @@ pub enum ContractError {
 
   #[error("ValidationError")]
   ValidationError,
+
+  #[error("PendingApproval: waiting for admin to review the win")]
+  PendingApproval,
+}
+
+impl From<ContractError> for StdError {
+  fn from(err: ContractError) -> Self {
+    StdError::generic_err(err.to_string())
+  }
 }

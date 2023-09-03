@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Uint128, Uint64};
+use cosmwasm_std::{Addr, Timestamp, Uint128, Uint64};
 use cw_lib::models::Owner;
 
 use crate::models::{AccountTotals, Claim, Config, Round, Ticket};
@@ -30,6 +30,12 @@ pub enum ExecuteMsg {
   },
   Claim {},
   Withdraw {},
+  Approve {
+    address: Addr,
+  },
+  Reject {
+    address: Addr,
+  },
 }
 
 #[cw_serde]
@@ -46,11 +52,22 @@ pub enum QueryMsg {
     fields: Option<Vec<String>>,
     wallet: Option<Addr>,
   },
+  DryRun {
+    ticket_count: u16,
+    seed: u32,
+    entropy: String,
+    time: Option<Timestamp>,
+    height: Option<Uint64>,
+    tx_index: Option<Uint64>,
+  },
+  ClaimsPendingApproval {},
 }
 
 #[cw_serde]
 pub enum MigrateMsg {
   V0_0_4 {},
+  V0_0_7 {},
+  V0_0_8 { use_approval: bool },
   NoOp {},
 }
 
@@ -62,6 +79,16 @@ pub struct AccountView {
 }
 
 #[cw_serde]
+pub struct ClaimView {
+  pub owner: Addr,
+  pub round_no: Uint64,
+  pub amount: Option<Uint128>,
+  pub tickets: Option<Vec<Ticket>>,
+  pub matches: Vec<u16>,
+  pub is_approved: bool,
+}
+
+#[cw_serde]
 pub struct SelectResponse {
   pub owner: Option<Owner>,
   pub config: Option<Config>,
@@ -70,4 +97,12 @@ pub struct SelectResponse {
   pub balance_claimable: Option<Uint128>,
   pub balance: Option<Uint128>,
   pub account: Option<AccountView>,
+}
+
+#[cw_serde]
+pub struct DryRunResponse {
+  pub seed: u32,
+  pub entropy: String,
+  pub winning_numbers: Vec<u16>,
+  pub match_counts: Vec<u16>,
 }

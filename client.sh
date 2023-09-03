@@ -55,7 +55,7 @@ transfer-ownership() {
 
 
 query-select() {
-  query='{"select":{"fields":["balance","balance_claimable"]}}'
+  query='{"select":{"fields":[],"wallet":"'$1'"}}'
   flags="--chain-id $CHAIN_ID --output json --node $NODE"
   echo junod query wasm contract-state smart $CONTRACT_ADDR "$query" $flags
   response=$(junod query wasm contract-state smart $CONTRACT_ADDR "$query" $flags)
@@ -81,7 +81,7 @@ case $CMD in
     query-drawing
     ;;
   query-select) 
-    query-select
+    query-select $1
     ;;
   *)
     echo "unrecognized option: $CMD" >&2
