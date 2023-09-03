@@ -65,9 +65,7 @@ pub enum QueryMsg {
 
 #[cw_serde]
 pub enum MigrateMsg {
-  V0_0_4 {},
-  V0_0_7 {},
-  V0_0_8 { use_approval: bool },
+  V0_0_9 {},
   NoOp {},
 }
 

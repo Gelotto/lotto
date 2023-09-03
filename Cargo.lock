@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "cw-lotto"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",

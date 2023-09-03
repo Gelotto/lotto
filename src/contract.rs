@@ -2,7 +2,7 @@ use crate::error::ContractError;
 use crate::execute;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::query;
-use crate::state::{self, CONFIG_TICKET_BATCH_SIZE, CONFIG_USE_APPROVAL, STAGED_CONFIG};
+use crate::state::{self, CONFIG_USE_APPROVAL, PREV_HEIGHT};
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response};
 use cw2::set_contract_version;
@@ -81,22 +81,15 @@ pub fn query(
 #[entry_point]
 pub fn migrate(
   deps: DepsMut,
-  _env: Env,
+  env: Env,
   msg: MigrateMsg,
 ) -> Result<Response, ContractError> {
   set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
   match msg {
-    MigrateMsg::V0_0_4 {} => {
-      if STAGED_CONFIG.load(deps.storage).is_err() {
-        STAGED_CONFIG.save(deps.storage, &None)?;
-      }
+    MigrateMsg::V0_0_9 {} => {
+      PREV_HEIGHT.save(deps.storage, &env.block.height.into())?;
+      CONFIG_USE_APPROVAL.save(deps.storage, &true)?;
     },
-    MigrateMsg::V0_0_7 {} => {
-      if CONFIG_TICKET_BATCH_SIZE.load(deps.storage).is_err() {
-        CONFIG_TICKET_BATCH_SIZE.save(deps.storage, &1000)?;
-      }
-    },
-    MigrateMsg::V0_0_8 { use_approval } => CONFIG_USE_APPROVAL.save(deps.storage, &use_approval)?,
     MigrateMsg::NoOp {} => {},
   }
   Ok(Response::default())

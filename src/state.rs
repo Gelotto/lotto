@@ -38,6 +38,7 @@ pub const OWNER: Item<Owner> = Item::new("owner");
 pub const ACCOUNTS: Map<Addr, Account> = Map::new("accounts");
 pub const TAXES: Map<Addr, Uint128> = Map::new("taxes");
 pub const DEBUG_WINNING_NUMBERS: Item<Option<Vec<u16>>> = Item::new("debug_winning_numbers");
+pub const PREV_HEIGHT: Item<Uint64> = Item::new("prev_height");
 
 pub const ROUND_STATUS: Item<RoundStatus> = Item::new("game_state");
 pub const ROUND_NO: Item<Uint64> = Item::new("round_counter");
@@ -82,6 +83,7 @@ pub fn initialize(
   OWNER.save(deps.storage, &owner)?;
   BALANCE_CLAIMABLE.save(deps.storage, &Uint128::zero())?;
   STAGED_CONFIG.save(deps.storage, &None)?;
+  PREV_HEIGHT.save(deps.storage, &env.block.height.into())?;
 
   for payout in msg.config.payouts.iter() {
     CONFIG_PAYOUTS.save(deps.storage, payout.n, payout)?;
@@ -196,6 +198,10 @@ pub fn is_ready(
   storage: &dyn Storage,
   block: &BlockInfo,
 ) -> Result<bool, ContractError> {
+  let prev_height = PREV_HEIGHT.load(storage)?.u64();
+  if block.height <= prev_height {
+    return Ok(false);
+  }
   let status = ROUND_STATUS.load(storage)?;
   if RoundStatus::Active == status {
     let round_start = ROUND_START.load(storage)?;

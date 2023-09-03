@@ -5,8 +5,8 @@ use crate::{
   models::{Account, Ticket},
   state::{
     generate_random_tickets, load_house, require_active_game_state, ACCOUNTS, CONFIG_MAX_NUMBER,
-    CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN, HOUSE_TICKET_TAX_PCT, ROUND_TICKETS,
-    ROUND_TICKET_COUNT,
+    CONFIG_NUMBER_COUNT, CONFIG_PRICE, CONFIG_TOKEN, HOUSE_TICKET_TAX_PCT, PREV_HEIGHT,
+    ROUND_TICKETS, ROUND_TICKET_COUNT,
   },
   util::{hash_numbers, mul_pct},
 };
@@ -41,6 +41,8 @@ pub fn buy(
 ) -> Result<Response, ContractError> {
   // Reject attempt to buy tickets if the lotto is currently drawing.
   require_active_game_state(deps.storage)?;
+
+  PREV_HEIGHT.save(deps.storage, &env.block.height.into())?;
 
   // The player is the address on whose behalf tickets are bought. If not
   // explicitly defined, default to the tx sender.
