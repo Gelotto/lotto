@@ -3,10 +3,10 @@ use crate::models::{Config, Round};
 use crate::msg::AccountView;
 use crate::state::{
   load_claim_tickets_by_account, load_payouts, ACCOUNTS, BALANCE_CLAIMABLE, CLAIMS, CONFIG_DRAWER,
-  CONFIG_HOUSE_ADDR, CONFIG_MARKETING, CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE, CONFIG_NUMBER_COUNT,
-  CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROLLING, CONFIG_ROUND_SECONDS, CONFIG_STYLE,
-  CONFIG_TICKET_BATCH_SIZE, CONFIG_TOKEN, CONFIG_USE_APPROVAL, DRAWINGS, ROUND_NO, ROUND_START,
-  ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
+  CONFIG_HOUSE_ADDR, CONFIG_MARKETING, CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE, CONFIG_NOIS_PROXY,
+  CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROLLING, CONFIG_ROUND_SECONDS,
+  CONFIG_STYLE, CONFIG_TICKET_BATCH_SIZE, CONFIG_TOKEN, CONFIG_USE_APPROVAL, DRAWINGS, ROUND_NO,
+  ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, TAXES,
 };
 use crate::util::calc_total_claim_amount;
 use crate::{msg::SelectResponse, state::OWNER};
@@ -60,6 +60,7 @@ pub fn select(
         drawer: CONFIG_DRAWER.load(deps.storage)?,
         batch_size: Some(CONFIG_TICKET_BATCH_SIZE.load(deps.storage)?),
         use_approval: Some(CONFIG_USE_APPROVAL.load(deps.storage)?),
+        nois_proxy: Some(CONFIG_NOIS_PROXY.load(deps.storage)?),
         token: token.clone(),
         round_seconds,
         min_balance,

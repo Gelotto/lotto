@@ -1,6 +1,7 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Timestamp, Uint128, Uint64};
+use cosmwasm_std::{Addr, Uint128, Uint64};
 use cw_lib::models::Owner;
+use nois::NoisCallback;
 
 use crate::models::{AccountTotals, Claim, Config, Round, Ticket};
 
@@ -25,9 +26,7 @@ pub enum ExecuteMsg {
     count: u16,
     seed: u32,
   },
-  Draw {
-    entropy: Option<String>,
-  },
+  Draw {},
   Claim {},
   Withdraw {},
   Approve {
@@ -35,6 +34,9 @@ pub enum ExecuteMsg {
   },
   Reject {
     address: Addr,
+  },
+  NoisReceive {
+    callback: NoisCallback,
   },
 }
 
@@ -52,20 +54,13 @@ pub enum QueryMsg {
     fields: Option<Vec<String>>,
     wallet: Option<Addr>,
   },
-  DryRun {
-    ticket_count: u16,
-    seed: u32,
-    entropy: String,
-    time: Option<Timestamp>,
-    height: Option<Uint64>,
-    tx_index: Option<Uint64>,
-  },
   ClaimsPendingApproval {},
 }
 
 #[cw_serde]
 pub enum MigrateMsg {
   V0_0_9 {},
+  V0_1_0 { nois_proxy: Addr },
   NoOp {},
 }
 

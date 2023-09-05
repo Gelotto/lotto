@@ -2,7 +2,7 @@ use crate::error::ContractError;
 use crate::execute;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::query;
-use crate::state::{self, CONFIG_USE_APPROVAL, PREV_HEIGHT};
+use crate::state::{self, CONFIG_NOIS_PROXY, CONFIG_USE_APPROVAL, PREV_HEIGHT};
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response};
 use cw2::set_contract_version;
@@ -36,12 +36,13 @@ pub fn execute(
       count,
       seed,
     } => execute::buy_seed(deps, env, info, player, count, seed),
-    ExecuteMsg::Draw { entropy } => execute::draw(deps, env, info, entropy),
     ExecuteMsg::Claim {} => execute::claim(deps, env, info),
     ExecuteMsg::Withdraw {} => execute::withdraw(deps, env, info),
     ExecuteMsg::SetConfig { config } => execute::set_config(deps, env, info, config),
     ExecuteMsg::Approve { address } => execute::approve(deps, env, info, address),
     ExecuteMsg::Reject { address } => execute::reject(deps, env, info, address),
+    ExecuteMsg::Draw {} => execute::draw(deps, env, info, None),
+    ExecuteMsg::NoisReceive { callback } => execute::draw(deps, env, info, Some(callback)),
   }
 }
 
@@ -57,23 +58,6 @@ pub fn query(
     QueryMsg::Ready => to_binary(&query::ready(deps, env)?),
     QueryMsg::Claims { cursor, limit } => to_binary(&query::claims(deps, cursor, limit)?),
     QueryMsg::ClaimsPendingApproval {} => to_binary(&query::claims_pending_approval(deps)?),
-    QueryMsg::DryRun {
-      ticket_count,
-      seed,
-      entropy,
-      time,
-      height,
-      tx_index,
-    } => to_binary(&query::dry_run(
-      deps,
-      env,
-      seed,
-      ticket_count,
-      entropy,
-      time,
-      height,
-      tx_index,
-    )?),
   }?;
   Ok(result)
 }
@@ -86,11 +70,14 @@ pub fn migrate(
 ) -> Result<Response, ContractError> {
   set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
   match msg {
+    MigrateMsg::NoOp {} => {},
     MigrateMsg::V0_0_9 {} => {
       PREV_HEIGHT.save(deps.storage, &env.block.height.into())?;
       CONFIG_USE_APPROVAL.save(deps.storage, &true)?;
     },
-    MigrateMsg::NoOp {} => {},
+    MigrateMsg::V0_1_0 { nois_proxy } => {
+      CONFIG_NOIS_PROXY.save(deps.storage, &nois_proxy)?;
+    },
   }
   Ok(Response::default())
 }

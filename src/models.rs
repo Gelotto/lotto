@@ -28,6 +28,7 @@ pub struct Config {
   pub drawer: Addr,
   pub batch_size: Option<u16>,
   pub use_approval: Option<bool>,
+  pub nois_proxy: Option<Addr>,
 }
 
 #[cw_serde]

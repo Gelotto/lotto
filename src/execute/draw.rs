@@ -9,25 +9,27 @@ use crate::{
   state::{
     draw_winning_numbers, load_drawing, load_payouts, load_winning_numbers, BALANCE_CLAIMABLE,
     CLAIMS, CONFIG_DRAWER, CONFIG_HOUSE_ADDR, CONFIG_MAX_NUMBER, CONFIG_MIN_BALANCE,
-    CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROLLING, CONFIG_ROUND_SECONDS,
-    CONFIG_TICKET_BATCH_SIZE, CONFIG_TOKEN, DRAWINGS, HOUSE_POT_TAX_PCT, JACKPOT_CLAIMANTS,
-    ROUND_NO, ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT, STAGED_CONFIG,
+    CONFIG_NOIS_PROXY, CONFIG_NUMBER_COUNT, CONFIG_PAYOUTS, CONFIG_PRICE, CONFIG_ROLLING,
+    CONFIG_ROUND_SECONDS, CONFIG_TICKET_BATCH_SIZE, CONFIG_TOKEN, DRAWINGS, HOUSE_POT_TAX_PCT,
+    JACKPOT_CLAIMANTS, ROUND_NO, ROUND_START, ROUND_STATUS, ROUND_TICKETS, ROUND_TICKET_COUNT,
+    STAGED_CONFIG,
   },
   util::mul_pct,
 };
 use cosmwasm_std::{
-  attr, Addr, Api, BlockInfo, Coin, DepsMut, Env, MessageInfo, Order, Response, Storage, Uint128,
-  Uint64, WasmMsg,
+  attr, to_binary, Addr, Api, BlockInfo, Coin, DepsMut, Env, MessageInfo, Order, Response, Storage,
+  Uint128, Uint64, WasmMsg,
 };
 use cw_lib::{models::Token, utils::funds::get_token_balance};
 use cw_storage_plus::{Bound, Map};
 use house_staking::{client::House, models::AccountTokenAmount};
+use nois::{NoisCallback, ProxyExecuteMsg};
 
 pub fn draw(
   deps: DepsMut,
   env: Env,
   info: MessageInfo,
-  maybe_entropy: Option<String>,
+  maybe_callback: Option<NoisCallback>,
 ) -> Result<Response, ContractError> {
   if info.sender != CONFIG_DRAWER.load(deps.storage)? {
     return Err(ContractError::NotAuthorized);
@@ -37,64 +39,70 @@ pub fn draw(
 
   match ROUND_STATUS.load(deps.storage)? {
     RoundStatus::Active => {
-      // draw winning numbers and process first page of tickets
-      let entropy = maybe_entropy.unwrap_or_default();
-      start_processing_tickets(deps, env, info, round_no, entropy)
+      if let Some(proxy_addr) = CONFIG_NOIS_PROXY.may_load(deps.storage)? {
+        // set the state to Drawing and wait on randomness from Nois network
+        request_randomness(deps, info, round_no, proxy_addr)
+      } else {
+        // we come here when not using the nois proxy, for local debugging
+        start_processing_tickets(deps, env, info, round_no)
+      }
     },
     RoundStatus::Drawing => {
       // process the next page of tickets
-      process_next_ticket_batch(deps, env, info, round_no)
+      if maybe_callback.is_some() {
+        start_processing_tickets_with_nois(deps, env, info, round_no, maybe_callback)
+      } else {
+        process_next_ticket_batch(deps, env, info, round_no)
+      }
     },
   }
 }
 
-pub fn start_processing_tickets(
+fn request_randomness(
+  deps: DepsMut,
+  info: MessageInfo,
+  round_no: Uint64,
+  nois_proxy_addr: Addr,
+) -> Result<Response, ContractError> {
+  ROUND_STATUS.save(deps.storage, &RoundStatus::Drawing)?;
+  Ok(
+    Response::new()
+      .add_attributes(vec![attr("action", "draw")])
+      .add_message(WasmMsg::Execute {
+        contract_addr: nois_proxy_addr.into(),
+        msg: to_binary(&ProxyExecuteMsg::GetNextRandomness {
+          job_id: round_no.to_string(),
+        })?,
+        funds: info.funds,
+      }),
+  )
+}
+
+fn start_processing_tickets_with_nois(
   deps: DepsMut,
   env: Env,
   info: MessageInfo,
   round_no: Uint64,
-  entropy: String,
+  callback: Option<NoisCallback>,
 ) -> Result<Response, ContractError> {
   ensure_round_can_end(deps.storage, &env.block)?;
 
+  if let Some(callback) = &callback {
+    if callback.job_id != round_no.to_string() {
+      return Err(ContractError::InvalidNoisJobId);
+    }
+  }
+
   // Get contract's token balance
-  let token = CONFIG_TOKEN.load(deps.storage)?;
-  let payouts = load_payouts(deps.storage)?;
   let ticket_count = ROUND_TICKET_COUNT.load(deps.storage)?;
   let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
 
-  deps
-    .api
-    .debug(format!(">>> ticket count: {}", ticket_count).as_str());
+  let token = CONFIG_TOKEN.load(deps.storage)?;
+  let payouts = load_payouts(deps.storage)?;
 
-  // No need to perform any draw logic if there aren't any tickets, so just end
-  // the round and prepare for the next.
-  if ticket_count == 0 {
-    resp = resp.add_attribute("is_complete", true.to_string());
-    reset_round_state(deps.storage, &env)?;
-    return Ok(resp);
-  }
-
-  // Get the current balance. After subtracting any taxes, we save this amount
-  // as the total pot size to be divided up among winning tickets.
   let contract_balance = get_token_balance(deps.querier, &env.contract.address, &token)?;
-
-  deps
-    .api
-    .debug(format!(">>> balance: {}", contract_balance.u128()).as_str());
-
   let taxable_balance = contract_balance - BALANCE_CLAIMABLE.load(deps.storage)?;
-
-  deps
-    .api
-    .debug(format!(">>> taxable balance: {}", taxable_balance.u128()).as_str());
-
-  // Select and save the winning numbers
-  let winning_numbers = draw_winning_numbers(deps.storage, &env, &entropy, None, None, None)?;
-
-  deps
-    .api
-    .debug(format!(">>> winning numbers: {:?}", winning_numbers).as_str());
+  let winning_numbers = draw_winning_numbers(deps.storage, &env, None, None, None, callback)?;
 
   // Init a Drawing record, which keeps track of the round's status with respect
   // to its drawing. This object aggregates totals accumulated across as many
@@ -113,9 +121,85 @@ pub fn start_processing_tickets(
     round_no: None,
   };
 
-  deps
-    .api
-    .debug(format!(">>> calling process_next_page").as_str());
+  // Process first page of tickets, updating the Drawing.
+  process_next_page(
+    deps.storage,
+    deps.api,
+    &payouts,
+    &winning_numbers,
+    round_no,
+    &mut drawing,
+  )?;
+
+  // If there's only one page worth of tickets, we can end the drawing process
+  // now; otherwise, we toggle the game state to "drawing" until a subsequent
+  // execution of the contract's draw function resets it to active, implying
+  // that we've entered the next round.
+  if drawing.is_complete() {
+    if let Some(house_msgs) = end_draw(
+      deps.storage,
+      deps.api,
+      &env,
+      &info.funds,
+      &payouts,
+      &mut drawing,
+      contract_balance,
+    )? {
+      resp = resp.add_messages(house_msgs);
+    }
+  }
+
+  // Persist accumulated changes to the Drawing
+  DRAWINGS.save(deps.storage, round_no.into(), &drawing)?;
+
+  Ok(resp.add_attribute("is_complete", drawing.is_complete().to_string()))
+}
+
+fn start_processing_tickets(
+  deps: DepsMut,
+  env: Env,
+  info: MessageInfo,
+  round_no: Uint64,
+) -> Result<Response, ContractError> {
+  ensure_round_can_end(deps.storage, &env.block)?;
+
+  // Get contract's token balance
+  let ticket_count = ROUND_TICKET_COUNT.load(deps.storage)?;
+  let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
+
+  // No need to perform any draw logic if there aren't any tickets, so just end
+  // the round and prepare for the next.
+  if ticket_count == 0 {
+    resp = resp.add_attribute("is_complete", true.to_string());
+    reset_round_state(deps.storage, &env)?;
+    return Ok(resp);
+  }
+
+  let token = CONFIG_TOKEN.load(deps.storage)?;
+  let payouts = load_payouts(deps.storage)?;
+
+  // Get the current balance. After subtracting any taxes, we save this amount
+  // as the total pot size to be divided up among winning tickets.
+  let contract_balance = get_token_balance(deps.querier, &env.contract.address, &token)?;
+  let taxable_balance = contract_balance - BALANCE_CLAIMABLE.load(deps.storage)?;
+  let winning_numbers = draw_winning_numbers(deps.storage, &env, None, None, None, None)?;
+
+  // Init a Drawing record, which keeps track of the round's status with respect
+  // to its drawing. This object aggregates totals accumulated across as many
+  // transactions as it takes to complete the drawing process.
+  let mut drawing = Drawing {
+    ticket_count,
+    round_balance: taxable_balance,
+    start_balance: CONFIG_MIN_BALANCE.load(deps.storage)?,
+    winning_numbers: winning_numbers.iter().map(|x| *x).collect(),
+    match_counts: vec![0; winning_numbers.len() + 1],
+    processed_ticket_count: 0,
+    total_payout: Uint128::zero(),
+    pot_payout: Uint128::zero(),
+    incentive_payout: Uint128::zero(),
+    cursor: None,
+    round_no: None,
+  };
 
   // Process first page of tickets, updating the Drawing.
   process_next_page(
@@ -132,7 +216,6 @@ pub fn start_processing_tickets(
   // execution of the contract's draw function resets it to active, implying
   // that we've entered the next round.
   if drawing.is_complete() {
-    deps.api.debug(format!(">>> calling end_draw").as_str());
     if let Some(house_msgs) = end_draw(
       deps.storage,
       deps.api,

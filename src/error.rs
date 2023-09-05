@@ -33,6 +33,12 @@ pub enum ContractError {
   #[error("ClaimNotFound")]
   ClaimNotFound,
 
+  #[error("InvalidNoisJobId")]
+  InvalidNoisJobId,
+
+  #[error("InvalidRandomness")]
+  InvalidRandomness,
+
   #[error("AccountNotFound")]
   AccountNotFound,
 

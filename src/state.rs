@@ -15,6 +15,7 @@ use cw_lib::random::{Pcg64, RngComponent};
 use cw_lib::utils::funds::build_send_submsg;
 use cw_storage_plus::{Item, Map};
 use house_staking::client::House;
+use nois::{int_in_range, NoisCallback};
 
 pub const HOUSE_TICKET_TAX_PCT: u128 = 5_0000; // 5%
 pub const HOUSE_POT_TAX_PCT: u128 = 10_0000; // 10%
@@ -33,6 +34,7 @@ pub const CONFIG_PAYOUTS: Map<u8, Payout> = Map::new("config_payouts");
 pub const CONFIG_DRAWER: Item<Addr> = Item::new("config_drawer");
 pub const CONFIG_TICKET_BATCH_SIZE: Item<u16> = Item::new("config_ticket_batch_size");
 pub const CONFIG_USE_APPROVAL: Item<bool> = Item::new("config_use_approval");
+pub const CONFIG_NOIS_PROXY: Item<Addr> = Item::new("config_nois_proxy");
 
 pub const OWNER: Item<Owner> = Item::new("owner");
 pub const ACCOUNTS: Map<Addr, Account> = Map::new("accounts");
@@ -103,8 +105,11 @@ pub fn initialize(
   CONFIG_USE_APPROVAL.save(deps.storage, &msg.config.use_approval.unwrap_or(false))?;
   CONFIG_TICKET_BATCH_SIZE.save(
     deps.storage,
-    &msg.config.batch_size.unwrap_or(1000).clamp(100, 1000),
+    &msg.config.batch_size.unwrap_or(1000).clamp(1, 1000),
   )?;
+  if let Some(proxy_addr) = msg.config.nois_proxy.clone() {
+    CONFIG_NOIS_PROXY.save(deps.storage, &proxy_addr)?;
+  }
 
   DEBUG_WINNING_NUMBERS.save(deps.storage, &msg.winning_numbers)?;
 
@@ -210,6 +215,12 @@ pub fn is_ready(
     if (round_start.seconds() + round_duration.u64()) > block.time.seconds() {
       return Ok(false);
     }
+  } else if status == RoundStatus::Drawing {
+    let round_no = ROUND_NO.load(storage)?;
+    if CONFIG_NOIS_PROXY.may_load(storage)?.is_some() && !DRAWINGS.has(storage, round_no.into()) {
+      // waiting on Nois callback
+      return Ok(false);
+    }
   }
   Ok(true)
 }
@@ -292,10 +303,10 @@ pub fn process_claim(
 pub fn draw_winning_numbers(
   storage: &dyn Storage,
   env: &Env,
-  entropy: &String,
   maybe_time: Option<Timestamp>,
   maybe_height: Option<u64>,
   maybe_tx_index: Option<u64>,
+  callback: Option<NoisCallback>,
 ) -> Result<HashSet<u16>, ContractError> {
   let round_no = ROUND_NO.load(storage)?;
   let time = maybe_time.unwrap_or(env.block.time);
@@ -315,7 +326,7 @@ pub fn draw_winning_numbers(
     tx_index,
     &env.contract.address,
     round_no,
-    entropy,
+    callback,
   )?;
   Ok(HashSet::from_iter(numbers.iter().map(|x| *x)))
 }
@@ -327,7 +338,7 @@ pub fn generate_random_numbers(
   tx_index: u64,
   contract_addr: &Addr,
   round_no: Uint64,
-  entropy: &String,
+  callback: Option<NoisCallback>,
 ) -> Result<Vec<u16>, ContractError> {
   if let Some(debug_winning_numbers) = DEBUG_WINNING_NUMBERS.load(storage)? {
     return Ok(debug_winning_numbers);
@@ -336,17 +347,26 @@ pub fn generate_random_numbers(
   let number_count = CONFIG_NUMBER_COUNT.load(storage)?;
   let max_value = CONFIG_MAX_NUMBER.load(storage)?;
   let mut winning_numbers: HashSet<u16> = HashSet::with_capacity(number_count as usize);
-  let mut rng = Pcg64::from_components(&vec![
-    RngComponent::Int(round_no.u64()),
-    RngComponent::Str(entropy.clone()),
-    RngComponent::Str(contract_addr.to_string()),
-    RngComponent::Int(height),
-    RngComponent::Int(time.nanos()),
-    RngComponent::Int(tx_index),
-  ]);
 
-  while winning_numbers.len() < number_count as usize {
-    winning_numbers.insert((rng.next_u64() % ((max_value + 1) as u64)) as u16);
+  if let Some(callback) = callback {
+    let randomness: [u8; 32] = callback
+      .randomness
+      .to_array()
+      .map_err(|_| ContractError::InvalidRandomness)?;
+    while winning_numbers.len() < number_count as usize {
+      winning_numbers.insert(int_in_range(randomness, 0, max_value) as u16);
+    }
+  } else {
+    let mut rng = Pcg64::from_components(&vec![
+      RngComponent::Int(round_no.u64()),
+      RngComponent::Str(contract_addr.to_string()),
+      RngComponent::Int(height),
+      RngComponent::Int(time.nanos()),
+      RngComponent::Int(tx_index),
+    ]);
+    while winning_numbers.len() < number_count as usize {
+      winning_numbers.insert((rng.next_u64() % ((max_value + 1) as u64)) as u16);
+    }
   }
 
   Ok(winning_numbers.iter().map(|x| *x).collect())
