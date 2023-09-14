@@ -1,8 +1,9 @@
 use crate::error::ContractError;
 use crate::execute;
+use crate::models::RoundStatus;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::query;
-use crate::state::{self, CONFIG_NOIS_PROXY, CONFIG_USE_APPROVAL, PREV_HEIGHT};
+use crate::state::{self, CONFIG_USE_APPROVAL, PREV_HEIGHT, ROUND_STATUS};
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response};
 use cw2::set_contract_version;
@@ -75,8 +76,10 @@ pub fn migrate(
       PREV_HEIGHT.save(deps.storage, &env.block.height.into())?;
       CONFIG_USE_APPROVAL.save(deps.storage, &true)?;
     },
-    MigrateMsg::V0_1_0 { nois_proxy } => {
-      CONFIG_NOIS_PROXY.save(deps.storage, &nois_proxy)?;
+    MigrateMsg::V0_1_0 { set_active } => {
+      if set_active {
+        ROUND_STATUS.save(deps.storage, &RoundStatus::Active)?;
+      }
     },
   }
   Ok(Response::default())

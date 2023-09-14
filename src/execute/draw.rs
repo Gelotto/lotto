@@ -31,40 +31,79 @@ pub fn draw(
   info: MessageInfo,
   maybe_callback: Option<NoisCallback>,
 ) -> Result<Response, ContractError> {
-  if info.sender != CONFIG_DRAWER.load(deps.storage)? {
-    return Err(ContractError::NotAuthorized);
-  }
-
   let round_no = ROUND_NO.load(deps.storage)?;
+  let round_status = ROUND_STATUS.load(deps.storage)?;
 
-  match ROUND_STATUS.load(deps.storage)? {
-    RoundStatus::Active => {
-      if let Some(proxy_addr) = CONFIG_NOIS_PROXY.may_load(deps.storage)? {
-        // set the state to Drawing and wait on randomness from Nois network
-        request_randomness(deps, info, round_no, proxy_addr)
-      } else {
-        // we come here when not using the nois proxy, for local debugging
-        start_processing_tickets(deps, env, info, round_no)
-      }
-    },
-    RoundStatus::Drawing => {
-      // process the next page of tickets
-      if maybe_callback.is_some() {
-        start_processing_tickets_with_nois(deps, env, info, round_no, maybe_callback)
-      } else {
-        process_next_ticket_batch(deps, env, info, round_no)
-      }
-    },
+  // Are we using Nois?
+  if let Some(proxy_addr) = CONFIG_NOIS_PROXY.may_load(deps.storage)?.unwrap_or(None) {
+    match round_status {
+      RoundStatus::Active => {
+        // Gelotto backend requesting randomness. Lotto goes to Drawing state.
+        if info.sender != CONFIG_DRAWER.load(deps.storage)? {
+          return Err(ContractError::NotAuthorized);
+        }
+        ensure_round_can_end(deps.storage, &env.block)?;
+        return request_randomness_from_nois(deps, env, info, round_no, proxy_addr);
+      },
+      RoundStatus::Drawing => {
+        // If a Drawing struct exists, continue processing the next ticket batch.
+        if let Some(mut drawing) = load_drawing(deps.storage, round_no).ok() {
+          if info.sender != CONFIG_DRAWER.load(deps.storage)? {
+            return Err(ContractError::NotAuthorized);
+          }
+          return process_next_ticket_batch(deps, env, info, round_no, &mut drawing);
+        }
+        // Otherwise, expect the next tx to receive randomness from nois proxy...
+        else {
+          if let Some(cb) = maybe_callback {
+            // We've received randomness from Nois. The lotto is expected to be in the
+            // Drawing state following a previous request_randomness tx.
+            if info.sender != proxy_addr {
+              return Err(ContractError::NotAuthorized);
+            }
+            return init_drawing_with_nois(deps, env, round_no, cb);
+          } else {
+            return Err(ContractError::WaitingForNois);
+          }
+        }
+      },
+    }
+  }
+  // We're using the built-in PRNG instead of Nois for E2E testing:
+  else {
+    match round_status {
+      RoundStatus::Active => {
+        ensure_round_can_end(deps.storage, &env.block)?;
+        return start_processing_tickets(deps, env, info, round_no);
+      },
+      RoundStatus::Drawing => {
+        let mut drawing = load_drawing(deps.storage, round_no)?;
+        return process_next_ticket_batch(deps, env, info, round_no, &mut drawing);
+      },
+    }
   }
 }
 
-fn request_randomness(
+fn request_randomness_from_nois(
   deps: DepsMut,
+  env: Env,
   info: MessageInfo,
   round_no: Uint64,
   nois_proxy_addr: Addr,
 ) -> Result<Response, ContractError> {
+  let ticket_count = ROUND_TICKET_COUNT.load(deps.storage)?;
+  let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
+
+  // No need to perform any draw logic if there aren't any tickets, so just end
+  // the round and prepare for the next.
+  if ticket_count == 0 {
+    resp = resp.add_attribute("is_complete", true.to_string());
+    reset_round_state(deps.storage, &env)?;
+    return Ok(resp);
+  }
+
   ROUND_STATUS.save(deps.storage, &RoundStatus::Drawing)?;
+
   Ok(
     Response::new()
       .add_attributes(vec![attr("action", "draw")])
@@ -78,36 +117,24 @@ fn request_randomness(
   )
 }
 
-fn start_processing_tickets_with_nois(
+fn init_drawing_with_nois(
   deps: DepsMut,
   env: Env,
-  info: MessageInfo,
   round_no: Uint64,
-  callback: Option<NoisCallback>,
+  callback: NoisCallback,
 ) -> Result<Response, ContractError> {
-  ensure_round_can_end(deps.storage, &env.block)?;
+  let resp = Response::new().add_attributes(vec![attr("action", "draw")]);
 
-  if let Some(callback) = &callback {
-    if callback.job_id != round_no.to_string() {
-      return Err(ContractError::InvalidNoisJobId);
-    }
-  }
-
-  // Get contract's token balance
   let ticket_count = ROUND_TICKET_COUNT.load(deps.storage)?;
-  let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
-
   let token = CONFIG_TOKEN.load(deps.storage)?;
-  let payouts = load_payouts(deps.storage)?;
-
   let contract_balance = get_token_balance(deps.querier, &env.contract.address, &token)?;
   let taxable_balance = contract_balance - BALANCE_CLAIMABLE.load(deps.storage)?;
-  let winning_numbers = draw_winning_numbers(deps.storage, &env, None, None, None, callback)?;
+  let winning_numbers = draw_winning_numbers(deps.storage, &env, None, None, None, Some(callback))?;
 
   // Init a Drawing record, which keeps track of the round's status with respect
   // to its drawing. This object aggregates totals accumulated across as many
   // transactions as it takes to complete the drawing process.
-  let mut drawing = Drawing {
+  let drawing = Drawing {
     ticket_count,
     round_balance: taxable_balance,
     start_balance: CONFIG_MIN_BALANCE.load(deps.storage)?,
@@ -121,38 +148,10 @@ fn start_processing_tickets_with_nois(
     round_no: None,
   };
 
-  // Process first page of tickets, updating the Drawing.
-  process_next_page(
-    deps.storage,
-    deps.api,
-    &payouts,
-    &winning_numbers,
-    round_no,
-    &mut drawing,
-  )?;
-
-  // If there's only one page worth of tickets, we can end the drawing process
-  // now; otherwise, we toggle the game state to "drawing" until a subsequent
-  // execution of the contract's draw function resets it to active, implying
-  // that we've entered the next round.
-  if drawing.is_complete() {
-    if let Some(house_msgs) = end_draw(
-      deps.storage,
-      deps.api,
-      &env,
-      &info.funds,
-      &payouts,
-      &mut drawing,
-      contract_balance,
-    )? {
-      resp = resp.add_messages(house_msgs);
-    }
-  }
-
   // Persist accumulated changes to the Drawing
   DRAWINGS.save(deps.storage, round_no.into(), &drawing)?;
 
-  Ok(resp.add_attribute("is_complete", drawing.is_complete().to_string()))
+  Ok(resp)
 }
 
 fn start_processing_tickets(
@@ -161,8 +160,6 @@ fn start_processing_tickets(
   info: MessageInfo,
   round_no: Uint64,
 ) -> Result<Response, ContractError> {
-  ensure_round_can_end(deps.storage, &env.block)?;
-
   // Get contract's token balance
   let ticket_count = ROUND_TICKET_COUNT.load(deps.storage)?;
   let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
@@ -367,10 +364,10 @@ pub fn process_next_ticket_batch(
   env: Env,
   info: MessageInfo,
   round_no: Uint64,
+  drawing: &mut Drawing,
 ) -> Result<Response, ContractError> {
   let payouts = load_payouts(deps.storage)?;
   let winning_numbers = load_winning_numbers(deps.storage, round_no.into())?;
-  let mut drawing = load_drawing(deps.storage, round_no)?;
 
   // Process next "page" of tickets, updating the Drawing and Claim records.
   process_next_page(
@@ -379,7 +376,7 @@ pub fn process_next_ticket_batch(
     &payouts,
     &winning_numbers,
     round_no,
-    &mut drawing,
+    drawing,
   )?;
 
   let mut resp = Response::new().add_attributes(vec![attr("action", "draw")]);
@@ -394,7 +391,7 @@ pub fn process_next_ticket_batch(
       &env,
       &info.funds,
       &payouts,
-      &mut drawing,
+      drawing,
       contract_balance,
     )? {
       resp = resp.add_messages(house_msgs);

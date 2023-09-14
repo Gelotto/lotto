@@ -60,7 +60,7 @@ pub fn select(
         drawer: CONFIG_DRAWER.load(deps.storage)?,
         batch_size: Some(CONFIG_TICKET_BATCH_SIZE.load(deps.storage)?),
         use_approval: Some(CONFIG_USE_APPROVAL.load(deps.storage)?),
-        nois_proxy: Some(CONFIG_NOIS_PROXY.load(deps.storage)?),
+        nois_proxy: CONFIG_NOIS_PROXY.load(deps.storage).unwrap_or(None),
         token: token.clone(),
         round_seconds,
         min_balance,

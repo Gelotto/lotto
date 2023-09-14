@@ -15,7 +15,7 @@ use cw_lib::random::{Pcg64, RngComponent};
 use cw_lib::utils::funds::build_send_submsg;
 use cw_storage_plus::{Item, Map};
 use house_staking::client::House;
-use nois::{int_in_range, NoisCallback};
+use nois::{pick, NoisCallback};
 
 pub const HOUSE_TICKET_TAX_PCT: u128 = 5_0000; // 5%
 pub const HOUSE_POT_TAX_PCT: u128 = 10_0000; // 10%
@@ -34,7 +34,7 @@ pub const CONFIG_PAYOUTS: Map<u8, Payout> = Map::new("config_payouts");
 pub const CONFIG_DRAWER: Item<Addr> = Item::new("config_drawer");
 pub const CONFIG_TICKET_BATCH_SIZE: Item<u16> = Item::new("config_ticket_batch_size");
 pub const CONFIG_USE_APPROVAL: Item<bool> = Item::new("config_use_approval");
-pub const CONFIG_NOIS_PROXY: Item<Addr> = Item::new("config_nois_proxy");
+pub const CONFIG_NOIS_PROXY: Item<Option<Addr>> = Item::new("config_nois_proxy");
 
 pub const OWNER: Item<Owner> = Item::new("owner");
 pub const ACCOUNTS: Map<Addr, Account> = Map::new("accounts");
@@ -103,13 +103,11 @@ pub fn initialize(
   CONFIG_STYLE.save(deps.storage, &msg.config.style)?;
   CONFIG_DRAWER.save(deps.storage, &msg.config.drawer)?;
   CONFIG_USE_APPROVAL.save(deps.storage, &msg.config.use_approval.unwrap_or(false))?;
+  CONFIG_NOIS_PROXY.save(deps.storage, &msg.config.nois_proxy)?;
   CONFIG_TICKET_BATCH_SIZE.save(
     deps.storage,
     &msg.config.batch_size.unwrap_or(1000).clamp(1, 1000),
   )?;
-  if let Some(proxy_addr) = msg.config.nois_proxy.clone() {
-    CONFIG_NOIS_PROXY.save(deps.storage, &proxy_addr)?;
-  }
 
   DEBUG_WINNING_NUMBERS.save(deps.storage, &msg.winning_numbers)?;
 
@@ -207,7 +205,9 @@ pub fn is_ready(
   if block.height <= prev_height {
     return Ok(false);
   }
+
   let status = ROUND_STATUS.load(storage)?;
+
   if RoundStatus::Active == status {
     let round_start = ROUND_START.load(storage)?;
     let round_duration = CONFIG_ROUND_SECONDS.load(storage)?;
@@ -222,6 +222,7 @@ pub fn is_ready(
       return Ok(false);
     }
   }
+
   Ok(true)
 }
 
@@ -349,13 +350,12 @@ pub fn generate_random_numbers(
   let mut winning_numbers: HashSet<u16> = HashSet::with_capacity(number_count as usize);
 
   if let Some(callback) = callback {
+    let numbers_vec: Vec<u16> = (0..=max_value as usize).map(|x| x as u16).collect();
     let randomness: [u8; 32] = callback
       .randomness
       .to_array()
       .map_err(|_| ContractError::InvalidRandomness)?;
-    while winning_numbers.len() < number_count as usize {
-      winning_numbers.insert(int_in_range(randomness, 0, max_value) as u16);
-    }
+    winning_numbers = HashSet::from_iter(pick(randomness, number_count as usize, numbers_vec));
   } else {
     let mut rng = Pcg64::from_components(&vec![
       RngComponent::Int(round_no.u64()),

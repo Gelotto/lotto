@@ -60,7 +60,7 @@ pub enum QueryMsg {
 #[cw_serde]
 pub enum MigrateMsg {
   V0_0_9 {},
-  V0_1_0 { nois_proxy: Addr },
+  V0_1_0 { set_active: bool },
   NoOp {},
 }
 

@@ -122,6 +122,12 @@ impl Config {
     &self,
     api: &dyn Api,
   ) -> Result<(), ContractError> {
+    if let Some(proxy_addr) = &self.nois_proxy {
+      api
+        .addr_validate(proxy_addr.as_str())
+        .map_err(|_| ContractError::ValidationError)?;
+    }
+
     api
       .addr_validate(self.drawer.as_str())
       .map_err(|_| ContractError::ValidationError)?;
