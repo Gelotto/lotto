@@ -19,10 +19,17 @@ pub enum ExecuteMsg {
   },
   Buy {
     player: Option<Addr>,
+    referrer: Option<Addr>,
     tickets: Vec<Vec<u16>>,
   },
   BuySeed {
     player: Option<Addr>,
+    referrer: Option<Addr>,
+    count: u16,
+    seed: u32,
+  },
+  SenderBuySeed {
+    referrer: Option<Addr>,
     count: u16,
     seed: u32,
   },
@@ -59,8 +66,7 @@ pub enum QueryMsg {
 
 #[cw_serde]
 pub enum MigrateMsg {
-  V0_0_9 {},
-  V0_1_0 { set_active: bool },
+  V0_1_1 {},
   NoOp {},
 }
 

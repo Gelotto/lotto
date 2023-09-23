@@ -97,6 +97,14 @@ pub struct Win {
 }
 
 #[cw_serde]
+pub struct ClaimV1 {
+  pub round_no: Uint64,
+  pub amount: Option<Uint128>,
+  pub tickets: Option<Vec<Ticket>>,
+  pub matches: Vec<u16>,
+}
+
+#[cw_serde]
 pub struct Claim {
   pub round_no: Uint64,
   pub amount: Option<Uint128>,

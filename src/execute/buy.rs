@@ -20,16 +20,29 @@ use cw_lib::{
 };
 use house_staking::models::AccountTokenAmount;
 
+pub fn sender_buy_seed(
+  deps: DepsMut,
+  env: Env,
+  info: MessageInfo,
+  maybe_referrer: Option<Addr>,
+  ticket_count: u16,
+  seed: u32,
+) -> Result<Response, ContractError> {
+  let tickets = generate_random_tickets(deps.storage, ticket_count, seed)?;
+  buy(deps, env, info, None, maybe_referrer, tickets)
+}
+
 pub fn buy_seed(
   deps: DepsMut,
   env: Env,
   info: MessageInfo,
   maybe_player: Option<Addr>,
+  maybe_referrer: Option<Addr>,
   ticket_count: u16,
   seed: u32,
 ) -> Result<Response, ContractError> {
   let tickets = generate_random_tickets(deps.storage, ticket_count, seed)?;
-  buy(deps, env, info, maybe_player, tickets)
+  buy(deps, env, info, maybe_player, maybe_referrer, tickets)
 }
 
 pub fn buy(
@@ -37,6 +50,7 @@ pub fn buy(
   env: Env,
   info: MessageInfo,
   maybe_player: Option<Addr>,
+  _maybe_referrer: Option<Addr>,
   tickets: Vec<Vec<u16>>,
 ) -> Result<Response, ContractError> {
   // Reject attempt to buy tickets if the lotto is currently drawing.

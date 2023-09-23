@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "cw-lotto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -228,7 +228,6 @@ dependencies = [
  "cw-utils",
  "cw2",
  "cw20",
- "cw_repository",
  "house-staking",
  "nois",
  "schemars",
@@ -305,23 +304,6 @@ dependencies = [
  "cw-utils",
  "schemars",
  "serde",
-]
-
-[[package]]
-name = "cw_repository"
-version = "0.0.3"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cw-acl",
- "cw-lib",
- "cw-storage-plus",
- "cw-utils",
- "cw2",
- "cw20",
- "schemars",
- "serde",
- "thiserror",
 ]
 
 [[package]]
@@ -510,7 +492,6 @@ dependencies = [
  "cw-utils",
  "cw2",
  "cw20",
- "cw_repository",
  "schemars",
  "serde",
  "thiserror",

@@ -11,8 +11,8 @@ use crate::state::{
 use crate::util::calc_total_claim_amount;
 use crate::{msg::SelectResponse, state::OWNER};
 use cosmwasm_std::{Addr, Deps, Env, Order};
+use cw_lib::loader::StateLoader;
 use cw_lib::utils::funds::get_token_balance;
-use cw_repository::client::Repository;
 
 pub fn select(
   deps: Deps,
@@ -20,7 +20,7 @@ pub fn select(
   maybe_fields: Option<Vec<String>>,
   maybe_account: Option<Addr>,
 ) -> Result<SelectResponse, ContractError> {
-  let loader = Repository::loader(deps.storage, &maybe_fields, &maybe_account);
+  let loader = StateLoader::new(deps.storage, &maybe_fields, &maybe_account);
 
   let round_no = ROUND_NO.load(deps.storage)?;
   let round_seconds = CONFIG_ROUND_SECONDS.load(deps.storage)?;
